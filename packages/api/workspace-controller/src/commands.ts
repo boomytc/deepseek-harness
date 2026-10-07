@@ -11,12 +11,16 @@ import {
   WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import { SessionPersistenceBusyError } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import { deletionDue, deletionEligibleAt, deletionTimes } from './retention.ts'
 import { workspaceView } from './feed.ts'
 import type {
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
+  WorkspaceDeleteArchivedSessionRequest,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
   WorkspaceInsertBeforeRequest,
@@ -34,8 +38,11 @@ import type {
 export class WorkspaceCommands {
   private operationTail = Promise.resolve()
 
-  /** @param ctx - Host context containing the Workspace registry. */
-  constructor(private readonly ctx: Context) {}
+  /**
+   * @param ctx - Host context containing the Workspace registry and Session storage.
+   * @param archivedRetentionDays - whole days an archived Session stays undeletable.
+   */
+  constructor(private readonly ctx: Context, private readonly archivedRetentionDays: number) {}
 
   /**
    * Create or resolve one Workspace over an existing directory.
@@ -179,10 +186,7 @@ export class WorkspaceCommands {
       }
       throw error
     }
-    return {
-      archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
-      archivedAt: { ...this.ctx.workspaceRegistry.archivedAt },
-    }
+    return this.archiveValue()
   }
 
   /**
@@ -194,10 +198,117 @@ export class WorkspaceCommands {
    */
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
+    return this.archiveValue()
+  }
+
+  /**
+   * Delete one archived Session's stored log irreversibly, once it has been
+   * archived for the Host's retention window: Session storage removes the
+   * artifacts first, and the registry drops its references only after they are
+   * gone, so a refusal leaves the Session exactly as it was — archived, listed,
+   * and deletable later.
+   *
+   * A Session that is not archived is refused as `workspace/session-not-archived`
+   * and one still inside its window as `workspace/session-retained`, whose
+   * details carry when it becomes due. A Session something still holds is
+   * refused as `workspace/session-busy`. An archived Session whose log is
+   * already gone resolves normally — the requested state is what it already
+   * is — and a failure between the two steps leaves an archived entry whose
+   * Session nothing can open, which the next attempt clears.
+   * @param request - Session identity to delete.
+   * @returns the complete resulting archive set.
+   */
+  async deleteArchivedSession(request: WorkspaceDeleteArchivedSessionRequest): Promise<WorkspaceArchiveValue> {
+    return await this.enqueue(async () => {
+      await this.deleteArchived(request.sessionId)
+      return this.archiveValue()
+    })
+  }
+
+  /**
+   * Delete every archived Session that reached the retention window. Every due
+   * Session is attempted even when one fails, because the durable archive-set
+   * writes already committed; the call then rejects with
+   * `workspace/session-delete-partial`, whose details name each failure, while
+   * the published archive set already excludes everything that succeeded.
+   * @returns the complete resulting archive set.
+   */
+  async deleteExpiredArchivedSessions(): Promise<WorkspaceArchiveValue> {
+    return await this.enqueue(async () => {
+      const due = this.ctx.workspaceRegistry.archivedSessionIds
+        .filter(sessionId => this.isDue(sessionId))
+      const failures: Array<{ sessionId: SessionId; code: string }> = []
+      for (const sessionId of due) {
+        try {
+          await this.deleteArchived(sessionId)
+        } catch (error: unknown) {
+          const failure = remoteErrorOf(error)
+          if (failure === undefined) throw error
+          failures.push({ sessionId, code: failure.code })
+        }
+      }
+      if (failures.length > 0) {
+        throw new RemoteError(
+          'workspace/session-delete-partial',
+          `deleted ${due.length - failures.length} of ${due.length} due archived sessions`,
+          { failures },
+        )
+      }
+      return this.archiveValue()
+    })
+  }
+
+  /** The complete archive set with its instants, as every archive mutation replies. */
+  private archiveValue(): WorkspaceArchiveValue {
     return {
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
       archivedAt: { ...this.ctx.workspaceRegistry.archivedAt },
+      archivedDeletionAt: deletionTimes(this.ctx.workspaceRegistry.archivedAt, this.archivedRetentionDays),
     }
+  }
+
+  /** Whether one archived Session has reached the configured deletion window. */
+  private isDue(sessionId: string): boolean {
+    return deletionDue(
+      this.ctx.workspaceRegistry.archivedAt[sessionId],
+      this.archivedRetentionDays,
+      Date.now(),
+    )
+  }
+
+  /**
+   * Delete one archived Session behind the retention check: its log first,
+   * then every registry reference to it.
+   * @param sessionId - Session to delete.
+   */
+  private async deleteArchived(sessionId: SessionId): Promise<void> {
+    const archivedAt = this.ctx.workspaceRegistry.archivedAt[sessionId]
+    if (archivedAt === undefined) {
+      throw new RemoteError(
+        'workspace/session-not-archived',
+        `session "${sessionId}" is not archived`,
+        { sessionId },
+      )
+    }
+    if (!deletionDue(archivedAt, this.archivedRetentionDays, Date.now())) {
+      throw new RemoteError(
+        'workspace/session-retained',
+        `session "${sessionId}" is archived until its retention window closes`,
+        { sessionId, archivedAt, eligibleAt: deletionEligibleAt(archivedAt, this.archivedRetentionDays) },
+      )
+    }
+    try {
+      await this.ctx.sessionPersistence.remove(sessionId)
+    } catch (error: unknown) {
+      if (!(error instanceof SessionPersistenceBusyError)) throw error
+      throw new RemoteError(
+        'workspace/session-busy',
+        error.message,
+        { sessionId, holder: error.holder },
+        { cause: error },
+      )
+    }
+    await this.ctx.workspaceRegistry.forgetSession(sessionId)
   }
 
   /**

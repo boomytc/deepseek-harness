@@ -4,6 +4,8 @@ import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionPersistenceBusyError } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistenceSnapshot, SessionRemovalResult } from '@deepseek-ai/dsh-session-persistence'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -50,7 +52,28 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve }
 }
 
-async function harness(options: { systemDocuments?: boolean } = {}) {
+/** Recording Session-storage double: the controller only lists and removes. */
+function persistenceDouble(over: {
+  readonly remove?: (id: SessionId) => Promise<SessionRemovalResult>
+} = {}) {
+  const removed: SessionId[] = []
+  return {
+    removed,
+    service: {
+      list: () => Promise.resolve([] as SessionPersistenceSnapshot[]),
+      remove: (id: SessionId) => {
+        removed.push(id)
+        return over.remove?.(id) ?? Promise.resolve<SessionRemovalResult>({ removed: true })
+      },
+    },
+  }
+}
+
+async function harness(options: {
+  systemDocuments?: boolean
+  archivedRetentionDays?: number
+  persistence?: ReturnType<typeof persistenceDouble>
+} = {}) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-workspace-controller-')))
   tempDirs.push(root)
   const ctx = new Context()
@@ -61,15 +84,21 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
   const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', storageDomain)
   ctx.provide('storageDomain', storageDomain)
-  ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+  const persistence = options.persistence ?? persistenceDouble()
+  ctx.provide('sessionPersistence', persistence.service as never)
   await ctx.plugin(WorkspaceRegistry)
   const dispose = (): void => {}
   ctx.provide('typert', {
     lookups: { configure: () => dispose },
     contexts: { configureHost: () => dispose },
   } as never)
-  const controller = new WorkspaceController(ctx, options.systemDocuments === true ? {} : { documentsDirectory: root })
-  return { controller, ctx, root, storageDomain }
+  const controller = new WorkspaceController(ctx, {
+    ...options.systemDocuments === true ? {} : { documentsDirectory: root },
+    ...options.archivedRetentionDays === undefined
+      ? {}
+      : { archivedRetentionDays: options.archivedRetentionDays },
+  })
+  return { controller, ctx, root, storageDomain, persistence }
 }
 
 function stageDir(root: string, name: string): string {
@@ -256,22 +285,30 @@ describe('WorkspaceController commands', () => {
     const stops: string[] = []
     const stopListening = ctx.on('workspace/session-stop', ({ sessionId }) => { stops.push(String(sessionId)) })
     await expect(controller.archiveSession({ sessionId: session.id, stopActivity: true }))
-      .resolves.toEqual({ archivedSessionIds: [session.id], archivedAt: { [session.id]: expect.any(String) } })
+      .resolves.toEqual({
+        archivedSessionIds: [session.id],
+        archivedAt: { [session.id]: expect.any(String) },
+        archivedDeletionAt: { [session.id]: expect.any(String) },
+      })
     expect(stops).toEqual([String(session.id)])
     stopListening()
     await expect(controller.unarchiveSession({ sessionId: session.id }))
-      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {} })
+      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {} })
     stopReporting()
 
     await expect(controller.archiveSession({ sessionId: session.id }))
-      .resolves.toEqual({ archivedSessionIds: [session.id], archivedAt: { [session.id]: expect.any(String) } })
+      .resolves.toEqual({
+        archivedSessionIds: [session.id],
+        archivedAt: { [session.id]: expect.any(String) },
+        archivedDeletionAt: { [session.id]: expect.any(String) },
+      })
     await expect(controller.archiveSession({ sessionId: SessionId('unknown') }))
       .rejects.toMatchObject({ code: 'session/not-found' })
     await expect(controller.unarchiveSession({ sessionId: session.id }))
-      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {} })
+      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {} })
     // Unarchive is idempotent: an id that is not archived is not an error.
     await expect(controller.unarchiveSession({ sessionId: session.id }))
-      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {} })
+      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {} })
   })
 
   it('pins only known unarchived Sessions and unpins idempotently', async () => {
@@ -302,11 +339,123 @@ describe('WorkspaceController commands', () => {
   })
 })
 
+describe('archived Session deletion', () => {
+  it('deletes a due archived Session, dropping every reference and then its log', async () => {
+    const { controller, ctx, root, persistence } = await harness({ archivedRetentionDays: 0 })
+    const workspace = await controller.create({ path: stageDir(root, 'retire') })
+    const session = ctx.sessions.create(SessionId('retire-me'), { meta: { cwd: root } })
+    await controller.archiveSession({ sessionId: session.id })
+
+    await expect(controller.deleteArchivedSession({ sessionId: session.id }))
+      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {} })
+
+    expect(persistence.removed).toEqual([session.id])
+    expect([...ctx.workspaceRegistry.archivedSessionIds]).toEqual([])
+    expect(ctx.workspaceRegistry.archivedAt).toEqual({})
+    expect(ctx.workspaceRegistry.get(workspace.workspace.workspaceId)?.sessionIds).not.toContain(session.id)
+  })
+
+  it('refuses a Session that is not archived, and one still inside its window', async () => {
+    const { controller, ctx, root, persistence } = await harness()
+    const session = ctx.sessions.create(SessionId('retained'), { meta: { cwd: root } })
+
+    await expect(controller.deleteArchivedSession({ sessionId: session.id }))
+      .rejects.toMatchObject({ code: 'workspace/session-not-archived' })
+
+    await controller.archiveSession({ sessionId: session.id })
+    const failure = await controller.deleteArchivedSession({ sessionId: session.id })
+      .then(() => undefined, (error: unknown) => error as RemoteError)
+    expect(failure).toMatchObject({ code: 'workspace/session-retained' })
+    // The refusal names the instant the window closes, three days out by default.
+    const details = failure?.details as { eligibleAt: number; archivedAt: string }
+    expect(details.eligibleAt - Date.parse(details.archivedAt)).toBe(3 * 24 * 60 * 60 * 1000)
+    expect(persistence.removed).toEqual([])
+  })
+
+  it('maps a held Session to a busy refusal and treats an already-absent log as done', async () => {
+    const busy = await harness({
+      archivedRetentionDays: 0,
+      persistence: persistenceDouble({
+        remove: id => Promise.reject(new SessionPersistenceBusyError(id, 'lease')),
+      }),
+    })
+    const held = busy.ctx.sessions.create(SessionId('held'), { meta: { cwd: busy.root } })
+    await busy.controller.archiveSession({ sessionId: held.id })
+    await expect(busy.controller.deleteArchivedSession({ sessionId: held.id }))
+      .rejects.toMatchObject({ code: 'workspace/session-busy', details: { holder: 'lease' } })
+
+    const gone = await harness({
+      archivedRetentionDays: 0,
+      persistence: persistenceDouble({
+        remove: () => Promise.resolve({ removed: false, code: 'session_not_found' }),
+      }),
+    })
+    const absent = gone.ctx.sessions.create(SessionId('absent'), { meta: { cwd: gone.root } })
+    await gone.controller.archiveSession({ sessionId: absent.id })
+    // Out-of-band removal already reached the requested state.
+    await expect(gone.controller.deleteArchivedSession({ sessionId: absent.id }))
+      .resolves.toEqual({ archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {} })
+  })
+
+  it('propagates a storage failure that is not a held-Session refusal', async () => {
+    const one = await harness({
+      archivedRetentionDays: 0,
+      persistence: persistenceDouble({ remove: () => Promise.reject(new Error('disk on fire')) }),
+    })
+    const session = one.ctx.sessions.create(SessionId('broken'), { meta: { cwd: one.root } })
+    await one.controller.archiveSession({ sessionId: session.id })
+    await expect(one.controller.deleteArchivedSession({ sessionId: session.id }))
+      .rejects.toThrow('disk on fire')
+    // The archive entry survives a failure that is not the requested state.
+    expect([...one.ctx.workspaceRegistry.archivedSessionIds]).toEqual([session.id])
+
+    // A bulk deletion rethrows the same way instead of reporting a per-Session code.
+    await expect(one.controller.deleteExpiredArchivedSessions()).rejects.toThrow('disk on fire')
+  })
+
+  it('deletes every due Session in bulk, reporting the ones it could not', async () => {
+    // The held Session is refused once: the retry finds it removable, which is
+    // the recovery path a partial bulk deletion leaves open.
+    let held = true
+    const { controller, ctx, root, persistence } = await harness({
+      archivedRetentionDays: 0,
+      persistence: persistenceDouble({
+        remove: (id) => {
+          if (id !== SessionId('stuck') || !held) return Promise.resolve({ removed: true })
+          held = false
+          return Promise.reject(new SessionPersistenceBusyError(id, 'handle'))
+        },
+      }),
+    })
+    const first = ctx.sessions.create(SessionId('first'), { meta: { cwd: root } })
+    const stuck = ctx.sessions.create(SessionId('stuck'), { meta: { cwd: root } })
+    await controller.archiveSession({ sessionId: first.id })
+    await controller.archiveSession({ sessionId: stuck.id })
+    // Not archived: a bulk deletion never reaches it.
+    const live = ctx.sessions.create(SessionId('live'), { meta: { cwd: root } })
+
+    await expect(controller.deleteExpiredArchivedSessions()).rejects.toMatchObject({
+      code: 'workspace/session-delete-partial',
+      details: { failures: [{ sessionId: stuck.id, code: 'workspace/session-busy' }] },
+    })
+    // The refused Session keeps its archive entry, so its row stays listed
+    // with the reason; the retry clears it.
+    expect(persistence.removed).toEqual([first.id, stuck.id])
+    expect([...ctx.workspaceRegistry.archivedSessionIds]).toEqual([stuck.id])
+    expect(live.id).toBeDefined()
+
+    await expect(controller.deleteExpiredArchivedSessions()).resolves.toEqual({
+      archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {},
+    })
+    expect([...ctx.workspaceRegistry.archivedSessionIds]).toEqual([])
+  })
+})
+
 describe('WorkspaceController follow', () => {
   it('seeds a new feed from existing rows and rejects an inconsistent registry commit', async () => {
     const { ctx, root } = await harness()
     const existing = await ctx.workspaceRegistry.create(stageDir(root, 'existing'))
-    const feed = new WorkspaceFeed(ctx)
+    const feed = new WorkspaceFeed(ctx, 3)
     expect(feed.baseline()).toMatchObject({
       items: [{ workspaceId: existing.id }],
     })
@@ -331,7 +480,7 @@ describe('WorkspaceController follow', () => {
     const { controller, ctx, root } = await harness()
     const session = ctx.sessions.create(SessionId('already-pinned'), { meta: { cwd: root } })
     await controller.pinSession({ sessionId: session.id })
-    const feed = new WorkspaceFeed(ctx)
+    const feed = new WorkspaceFeed(ctx, 3)
     const abort = new AbortController()
     const iterator = feed.follow(abort.signal)[Symbol.asyncIterator]()
     try {
@@ -352,7 +501,13 @@ describe('WorkspaceController follow', () => {
     const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
     await expect(nextFrame(iterator)).resolves.toEqual({
       type: 'baseline',
-      value: { items: [], archivedSessionIds: [], archivedAt: {}, pinnedSessionIds: [] },
+      value: {
+        items: [],
+        archivedSessionIds: [],
+        archivedAt: {},
+        archivedDeletionAt: {},
+        pinnedSessionIds: [],
+      },
     })
 
     const first = await controller.create({ path: stageDir(root, 'first') })
@@ -391,11 +546,12 @@ describe('WorkspaceController follow', () => {
       type: 'archived',
       archivedSessionIds: [session.id],
       archivedAt: { [session.id]: expect.any(String) },
+      archivedDeletionAt: { [session.id]: expect.any(String) },
     })
     // Unarchive rides the same complete-set increment: no new frame type.
     await controller.unarchiveSession({ sessionId: session.id })
     await expect(nextFrame(iterator)).resolves.toEqual({
-      type: 'archived', archivedSessionIds: [], archivedAt: {},
+      type: 'archived', archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {},
     })
     await controller.pinSession({ sessionId: session.id })
     await expect(nextFrame(iterator)).resolves.toEqual({

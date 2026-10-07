@@ -96,6 +96,7 @@ function workspaceState(
     items,
     archivedSessionIds,
     archivedAt: {},
+    archivedDeletionAt: {},
     pinnedSessionIds: [],
     phase,
     state: phase === 'ready' ? 'idle' : 'loading',
@@ -195,6 +196,19 @@ class FakeWorkspaces implements IWorkspaces {
     }))
   }
 
+  readonly deleteCalls: SessionId[] = []
+  onDeleteArchived: IWorkspaces['deleteArchivedSession'] = async (sessionId) => {
+    this.list.update(state => ({
+      ...state,
+      archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+    }))
+  }
+
+  readonly deleteExpiredCalls: number[] = []
+  onDeleteExpired: IWorkspaces['deleteExpiredArchivedSessions'] = async () => {
+    this.list.update(state => ({ ...state, archivedSessionIds: [] }))
+  }
+
   declare readonly create: IWorkspaces['create']
   declare readonly rename: IWorkspaces['rename']
   declare readonly delete: IWorkspaces['delete']
@@ -234,6 +248,16 @@ class FakeWorkspaces implements IWorkspaces {
       ...state,
       pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
     }))
+  }
+
+  deleteArchivedSession(sessionId: SessionId): Promise<void> {
+    this.deleteCalls.push(sessionId)
+    return this.onDeleteArchived(sessionId)
+  }
+
+  deleteExpiredArchivedSessions(): Promise<void> {
+    this.deleteExpiredCalls.push(this.deleteExpiredCalls.length)
+    return this.onDeleteExpired()
   }
 }
 
@@ -1290,6 +1314,23 @@ describe('UiWorkspaceService', () => {
     b.workspaces.onUnarchive = () => Promise.reject(new Error('unarchive rejected'))
     await expect(b.uiWorkspace.unarchiveSession(idle)).rejects.toThrow('unarchive rejected')
     expect(b.workspaces.unarchiveCalls).toEqual([idle, idle])
+  })
+
+  it('forwards deletion commands and preserves failures', async () => {
+    const doomed = sid('doomed')
+    const b = bench()
+
+    await b.uiWorkspace.deleteArchivedSession(doomed)
+    expect(b.workspaces.deleteCalls).toEqual([doomed])
+    b.workspaces.onDeleteArchived = () => Promise.reject(new Error('delete rejected'))
+    await expect(b.uiWorkspace.deleteArchivedSession(doomed)).rejects.toThrow('delete rejected')
+    expect(b.workspaces.deleteCalls).toEqual([doomed, doomed])
+
+    await b.uiWorkspace.deleteExpiredArchivedSessions()
+    expect(b.workspaces.deleteExpiredCalls).toHaveLength(1)
+    b.workspaces.onDeleteExpired = () => Promise.reject(new Error('bulk rejected'))
+    await expect(b.uiWorkspace.deleteExpiredArchivedSessions()).rejects.toThrow('bulk rejected')
+    expect(b.workspaces.deleteExpiredCalls).toHaveLength(2)
   })
 
   it('passes directory operations to the Host and preserves structured browse failures', async () => {

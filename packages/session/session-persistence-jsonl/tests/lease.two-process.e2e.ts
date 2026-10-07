@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
-import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
+import { SessionAlreadyOwnedError, SessionPersistenceBusyError } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 const SESSION = 'two-process-lease'
@@ -62,6 +62,35 @@ describe('two-process write lock (built lib)', () => {
       await taken.append([{ type: 'turn/start', seq: SessionSeq(2), time: 3, data: { turn: 2 } }])
       expect((await taken.read()).events.map(event => event.seq)).toEqual([0, 1, 2])
       await taken.close()
+    } finally {
+      if (holder.exitCode === null) holder.kill('SIGKILL')
+    }
+  })
+
+  it('refuses removal while another process write-owns the session', { timeout: 30_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-lease-remove-'))
+    dirs.push(root)
+
+    const holder = spawn(process.execPath, [HOLDER, root, SESSION], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    const exited = new Promise<void>((resolve) => { holder.once('exit', () => { resolve() }) })
+    try {
+      await once(holder.stdout, 'data')
+      const ctx = new Context()
+      contexts.push(ctx)
+      await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+
+      // The other process's kernel lock is what makes its appends safe: taking
+      // it proves nothing is writing into the files removal would unlink.
+      await expect(ctx.sessionPersistence.remove(SessionId(SESSION)))
+        .rejects.toBeInstanceOf(SessionPersistenceBusyError)
+
+      holder.kill('SIGKILL')
+      await exited
+      await expect(ctx.sessionPersistence.remove(SessionId(SESSION))).resolves.toEqual({ removed: true })
+      await expect(ctx.sessionPersistence.open(SessionId(SESSION), 'read'))
+        .rejects.toThrow(/not found/)
     } finally {
       if (holder.exitCode === null) holder.kill('SIGKILL')
     }

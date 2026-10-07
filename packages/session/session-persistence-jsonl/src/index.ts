@@ -22,13 +22,14 @@ import { createHash, randomBytes } from 'node:crypto'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceBusyError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
-  type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
+  type SessionPersistenceRemoveOptions, type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
+  type SessionRemovalResult,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
@@ -506,6 +507,52 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Delete one stored session's artifact directory: every retained format
+   * generation and the write-lock file beside them.
+   *
+   * The cross-process write lock is what makes the unlink safe. A writer in
+   * another process holds it for the whole life of its handle, so acquiring it
+   * proves no append is in flight into the files about to be removed — without
+   * that proof, a live writer would keep appending to an unlinked inode and
+   * silently lose every later event. An open handle here is refused for the
+   * same reason: its reader or writer memorized a cursor into these files.
+   *
+   * A read that is already opening the session when removal starts is not
+   * excluded: it observes either the state it parsed or a not-found failure,
+   * and a format migration it triggered may leave a successor generation
+   * behind. Nothing reads such a leftover, because the id is gone from every
+   * index that would name it.
+   * @param id - the stored session to delete.
+   * @param options - optional cancellation.
+   * @returns whether a stored session was removed.
+   */
+  async remove(id: SessionId, options?: SessionPersistenceRemoveOptions): Promise<SessionRemovalResult> {
+    options?.signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    options?.signal?.throwIfAborted()
+    if (this.tracker.claimed(id)) throw new SessionPersistenceBusyError(id, 'handle')
+    const selected = await this.findLog(id, options?.signal)
+    if (selected === undefined) return { removed: false, code: 'session_not_found' }
+    const directory = dirname(selected.sourcePath)
+    let lease: SessionWriteLease
+    try {
+      lease = await SessionWriteLease.acquire(directory, id)
+    } catch (error: unknown) {
+      if (error instanceof SessionAlreadyOwnedError) throw new SessionPersistenceBusyError(id, 'lease')
+      throw error
+    }
+    try {
+      // The memo would otherwise answer a later read of this id from a log
+      // that no longer has a file.
+      this.coldLogMemo.delete(id)
+      await rm(directory, { recursive: true, force: true })
+    } finally {
+      await lease.release()
+    }
+    return { removed: true }
   }
 
   // --- handle-facing storage internals (package-private via the handle class below) ---

@@ -449,6 +449,18 @@ export class JsonlBackendTracker {
   }
 
   /**
+   * Whether any open handle in this process addresses the Session, including a
+   * write claim whose handle is still being constructed.
+   * @param id - the Session to test.
+   * @returns true while this process holds the Session.
+   */
+  claimed(id: SessionId): boolean {
+    if (this.writers.has(id)) return true
+    for (const handle of this.openHandles) if (handle.id === id) return true
+    return false
+  }
+
+  /**
    * Whether this process still tracks a created-but-unmaterialized session.
    * @param id - the session to test.
    * @returns true while the pending entry exists.

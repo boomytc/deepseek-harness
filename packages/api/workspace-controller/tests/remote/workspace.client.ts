@@ -9,6 +9,7 @@ import { ok, type RemoteTable, type StreamScript } from '@deepseek-ai/dsh-remote
 import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   WorkspaceArchiveSessionRequest,
+  WorkspaceDeleteArchivedSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
@@ -69,7 +70,7 @@ export function workspace(id: string, overrides: Partial<WorkspaceView> = {}): W
 export function baseline(...ids: readonly string[]): WorkspaceBaselineFrame {
   return {
     type: 'baseline',
-    value: { items: ids.map(id => workspace(id)), archivedSessionIds: [], archivedAt: {}, pinnedSessionIds: [] },
+    value: { items: ids.map(id => workspace(id)), archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {}, pinnedSessionIds: [] },
   }
 }
 
@@ -106,8 +107,23 @@ export const workspaceWorld: RemoteTable = {
     'workspace/archiveSession': (request: WorkspaceArchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({
       archivedSessionIds: [request.sessionId],
       archivedAt: { [request.sessionId]: '2026-09-02T00:00:00.000Z' },
+      archivedDeletionAt: { [request.sessionId]: '2026-09-05T00:00:00.000Z' },
     }),
-    'workspace/unarchiveSession': (_request: WorkspaceUnarchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({ archivedSessionIds: [], archivedAt: {} }),
+    'workspace/unarchiveSession': (_request: WorkspaceUnarchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({
+      archivedSessionIds: [],
+      archivedAt: {},
+      archivedDeletionAt: {},
+    }),
+    'workspace/deleteArchivedSession': (_request: WorkspaceDeleteArchivedSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({
+      archivedSessionIds: [],
+      archivedAt: {},
+      archivedDeletionAt: {},
+    }),
+    'workspace/deleteExpiredArchivedSessions': (): RemoteResult<WorkspaceArchiveValue> => ok({
+      archivedSessionIds: [],
+      archivedAt: {},
+      archivedDeletionAt: {},
+    }),
     'workspace/pinSession': (request: WorkspacePinSessionRequest): RemoteResult<WorkspacePinValue> => ok({ pinnedSessionIds: [request.sessionId] }),
     'workspace/unpinSession': (_request: WorkspaceUnpinSessionRequest): RemoteResult<WorkspacePinValue> => ok({ pinnedSessionIds: [] }),
   },

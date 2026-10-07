@@ -20,6 +20,7 @@ import {
   SessionAlreadyOwnedError,
   SessionFormatUnsupportedError,
   SessionHandleClosedError,
+  SessionPersistenceBusyError,
   SessionPersistenceNotFoundError,
   SessionReadOnlyError,
 } from '../src/index.ts'
@@ -606,6 +607,69 @@ export function runPersistenceContract(name: string, make: () => Promise<Contrac
         await writer.close()
 
         expect(await persistence.stat(SessionId('absent-stat'))).toBeUndefined()
+      } finally {
+        await dispose()
+      }
+    })
+
+    it('remove deletes a stored session here and for a fresh instance, freeing the id', async () => {
+      const backend = await make()
+      try {
+        const m = meta('remove-me', '/work')
+        const creator = await backend.persistence.create(m)
+        await creator.append(oneTurnLog())
+        await creator.close()
+
+        await expect(backend.persistence.remove(m.id)).resolves.toEqual({ removed: true })
+        await expect(backend.persistence.stat(m.id)).resolves.toBeUndefined()
+        expect((await backend.persistence.list()).map(snapshot => snapshot.header.id)).not.toContain(m.id)
+        await expect(backend.persistence.open(m.id, 'read')).rejects.toThrow(SessionPersistenceNotFoundError)
+
+        if (backend.reopen !== undefined) {
+          const reopened = await backend.reopen()
+          try {
+            await expect(reopened.persistence.open(m.id, 'read')).rejects.toThrow(SessionPersistenceNotFoundError)
+          } finally {
+            await reopened.dispose()
+          }
+        }
+
+        // The id names no lifecycle any more: a later create starts an empty one.
+        const recreated = await backend.persistence.create(m)
+        expect((await recreated.read()).events).toEqual([])
+        await recreated.close()
+      } finally {
+        await backend.dispose()
+      }
+    })
+
+    it('remove reports an absent session as a result instead of a failure', async () => {
+      const { persistence, dispose } = await make()
+      try {
+        await expect(persistence.remove(SessionId('never-stored')))
+          .resolves.toEqual({ removed: false, code: 'session_not_found' })
+      } finally {
+        await dispose()
+      }
+    })
+
+    it('remove refuses a session an open handle still addresses, and succeeds after it closes', async () => {
+      const { persistence, dispose } = await make()
+      try {
+        const m = meta('busy-remove', '/work')
+        const creator = await persistence.create(m)
+        await creator.append(oneTurnLog())
+        await creator.close()
+
+        const reader = await persistence.open(m.id, 'read')
+        await expect(persistence.remove(m.id)).rejects.toThrow(SessionPersistenceBusyError)
+        await reader.close()
+
+        const writer = await persistence.open(m.id, 'write')
+        await expect(persistence.remove(m.id)).rejects.toThrow(SessionPersistenceBusyError)
+        await writer.close()
+
+        await expect(persistence.remove(m.id)).resolves.toEqual({ removed: true })
       } finally {
         await dispose()
       }

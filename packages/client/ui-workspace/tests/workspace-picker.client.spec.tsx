@@ -39,7 +39,7 @@ const sessions: SessionListState = {
 }
 const noPendingInteraction: SessionStatusSnapshot = new Map()
 const workspaceState = (items: readonly WorkspaceView[]): WorkspaceSnapshot => ({
-  items, archivedSessionIds: [], archivedAt: {}, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+  items, archivedSessionIds: [], archivedAt: {}, archivedDeletionAt: {}, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
 })
 function anchor(): { current: HTMLElement } {
   const element = document.createElement('button')

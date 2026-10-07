@@ -24,6 +24,8 @@ kind: "package-reference"
 
 Host 控制器会串行执行正确性取决于当前注册表状态的变更，并为预期失败抛出带有稳定错误码的 `RemoteError`。它的 `follow()` 流会同步订阅持久 Workspace 变更，先发出一份完整 baseline，再按顺序发出 `upsert`、`remove`、`order`、`archived` 和 `pinned` 增量。归档与置顶集合都是会话 id 数组，置顶数组把最近置顶的 id 放在前面。每一份归档值——baseline、`archived` 增量以及两个命令的返回值——同时携带 `archivedAt`，即每个已归档 id 对应的 ISO-8601 时间，消费方无需再从会话活动推断其年龄。重连会以替换 baseline 开始新一代，因此消费方不依赖收到断线期间的每个增量。不带 `stopActivity` 的 `archiveSession` 会以 `workspace/session-active` 拒绝仍有工作在跑的会话，其 details 按族（`turn`、`subagent`、`job`、`schedule`）列出这些工作及各项的 id 与名称；带 `stopActivity: true` 时注册表的提供方先停止这些工作，归档集合持久化后即返回响应，停止在后台收敛。
 
+`deleteArchivedSession` 与 `deleteExpiredArchivedSessions` 会彻底删除已存储日志，两者都按本插件的 `archivedRetentionDays` 配置（默认三天；`0` 表示归档后即可删除）以 `archivedAt` 计量年龄。该窗口随 baseline 下发给客户端，界面因此能精准地在宿主会接受时提供删除：未归档的会话以 `workspace/session-not-archived` 拒绝，仍在窗口内的以 `workspace/session-retained` 拒绝并在 details 中给出到期时刻，仍被占用的以 `workspace/session-busy` 拒绝。会话存储先删除日志、注册表随后清除引用，因此一次拒绝只是让该会话保持原状，之后仍可再删；批量命令会尝试每个到期会话，随后以 `workspace/session-delete-partial` 拒绝并列出各会话的失败，而已发布的归档集合早已排除成功的那些。
+
 Client 入口提供 `ClientWorkspaceModel` 和 `createWorkspaceStateStream()`。该模型拥有 Workspace 行、registry 顺序、归档与置顶会话身份、一元变更回显，以及流与一元调用的竞态处理。较新的 Host 行按 `updatedAt` 获胜；已提交的流顺序优先于较旧的一元响应；已经移除的 Workspace id 不会被延迟数据复活。置顶快照仅在会话身份或顺序变化时更新。该包公开与框架无关的快照和订阅，把导航策略与 React 钩子留给 UI owner。`WorkspaceController.archiveSession(sessionId, { stopActivity })` 抛出携带 Host `rpcError` 的 `WorkspaceArchiveError`，界面因此能区分"仍有工作在跑"的拒绝与会话缺失或载体故障，并提议停止这些工作。
 
 <a id="first-use-workspace"></a>

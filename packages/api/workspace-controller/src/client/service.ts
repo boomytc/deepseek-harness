@@ -31,6 +31,23 @@ export class WorkspaceArchiveError extends Error {
   }
 }
 
+/**
+ * Deleting stored Sessions failed on the Host. `rpcError.code` distinguishes
+ * a Session that is not archived (`workspace/session-not-archived`), one still
+ * inside its retention window (`workspace/session-retained`, whose details say
+ * when it is due), one something still holds (`workspace/session-busy`), and a
+ * bulk deletion that removed some Sessions
+ * (`workspace/session-delete-partial`, whose details name each failure).
+ */
+export class WorkspaceSessionDeleteError extends Error {
+  override readonly name = 'WorkspaceSessionDeleteError'
+
+  /** @param rpcError - Host business or folded carrier failure. */
+  constructor(readonly rpcError: RemoteFailure) {
+    super(`workspace session delete failed: ${rpcError.code}: ${rpcError.message}`)
+  }
+}
+
 /** Bare observable source for the Workspace Controller snapshot. */
 export interface WorkspaceSource {
   /** Read the identity-stable current snapshot. */
@@ -90,6 +107,19 @@ export interface IWorkspaces {
    * @param sessionId - Session to unarchive.
    */
   unarchiveSession(sessionId: SessionId): Promise<void>
+  /**
+   * Delete an archived Session's stored log irreversibly.
+   * @param sessionId - Session to delete.
+   * @throws {WorkspaceSessionDeleteError} when the Host refuses; a Session
+   *   still inside its retention window fails as `workspace/session-retained`.
+   */
+  deleteArchivedSession(sessionId: SessionId): Promise<void>
+  /**
+   * Delete every archived Session that reached the Host's retention window.
+   * @throws {WorkspaceSessionDeleteError} when the Host refuses, including a
+   *   partial bulk deletion (`workspace/session-delete-partial`).
+   */
+  deleteExpiredArchivedSessions(): Promise<void>
   /**
    * Pin a Session ahead of unpinned Sessions on Workspace grouping surfaces.
    * @param sessionId - Session to pin.
@@ -163,6 +193,16 @@ export class WorkspaceController extends Service implements IWorkspaces {
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     const result = await this.model.unarchiveSession(sessionId)
     if (!result.ok) throw commandError('session unarchive', result.error)
+  }
+
+  async deleteArchivedSession(sessionId: SessionId): Promise<void> {
+    const result = await this.model.deleteArchivedSession(sessionId)
+    if (!result.ok) throw new WorkspaceSessionDeleteError(result.error)
+  }
+
+  async deleteExpiredArchivedSessions(): Promise<void> {
+    const result = await this.model.deleteExpiredArchivedSessions()
+    if (!result.ok) throw new WorkspaceSessionDeleteError(result.error)
   }
 
   async pinSession(sessionId: SessionId): Promise<void> {

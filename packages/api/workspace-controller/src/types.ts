@@ -50,6 +50,26 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly sessionId: SessionId
       readonly beforeSessionId?: SessionId
     }
+    /** The Session is not archived, so deletion was refused. */
+    'workspace/session-not-archived': { readonly sessionId: SessionId }
+    /**
+     * The Session is archived but still inside the Host's retention window;
+     * `eligibleAt` is the instant from which deletion succeeds.
+     */
+    'workspace/session-retained': {
+      readonly sessionId: SessionId
+      readonly archivedAt: string
+      readonly eligibleAt: number
+    }
+    /** Something still holds the Session, so its artifacts cannot be removed. */
+    'workspace/session-busy': {
+      readonly sessionId: SessionId
+      readonly holder: 'handle' | 'lease'
+    }
+    /** A bulk deletion removed some due Sessions and failed on others. */
+    'workspace/session-delete-partial': {
+      readonly failures: readonly { readonly sessionId: SessionId; readonly code: string }[]
+    }
     /** The verb needs an interaction the composed backend does not serve. */
     'directory-picker/unavailable': { readonly capability: string }
     /** The target is not fully qualified, or the backend cannot list it. */
@@ -129,7 +149,7 @@ export interface WorkspaceUnarchiveSessionRequest {
   readonly sessionId: SessionId
 }
 
-/** Archive instants by Session id, ISO-8601; the keys are exactly the archived Session ids. */
+/** ISO-8601 instants by Session id; the keys are exactly the archived Session ids. */
 export type WorkspaceArchiveTimes = Readonly<Record<string, string>>
 
 /** Complete archived Session set after a mutation. */
@@ -137,6 +157,17 @@ export interface WorkspaceArchiveValue {
   readonly archivedSessionIds: readonly SessionId[]
   /** One archive instant per id in `archivedSessionIds`. */
   readonly archivedAt: WorkspaceArchiveTimes
+  /**
+   * When deletion becomes available for each id, after the Host's retention
+   * window. Carried so a Client renders that availability without knowing the
+   * policy behind it.
+   */
+  readonly archivedDeletionAt: WorkspaceArchiveTimes
+}
+
+/** Session requested for irreversible deletion from the archived Session list. */
+export interface WorkspaceDeleteArchivedSessionRequest {
+  readonly sessionId: SessionId
 }
 
 /** Session requested for pinning ahead of unpinned Sessions on grouping surfaces. */
@@ -160,6 +191,8 @@ export interface WorkspaceBaseline {
   readonly archivedSessionIds: readonly SessionId[]
   /** One archive instant per id in `archivedSessionIds`. */
   readonly archivedAt: WorkspaceArchiveTimes
+  /** Deletion instants for the ids in `archivedSessionIds`. */
+  readonly archivedDeletionAt: WorkspaceArchiveTimes
   /** Registry-global pin set, most recently pinned first. */
   readonly pinnedSessionIds: readonly SessionId[]
 }
@@ -169,7 +202,12 @@ export type WorkspaceFollowIncrement =
   | { readonly type: 'upsert'; readonly workspace: WorkspaceView }
   | { readonly type: 'remove'; readonly workspaceId: WorkspaceId }
   | { readonly type: 'order'; readonly workspaceIds: readonly WorkspaceId[] }
-  | { readonly type: 'archived'; readonly archivedSessionIds: readonly SessionId[]; readonly archivedAt: WorkspaceArchiveTimes }
+  | {
+    readonly type: 'archived'
+    readonly archivedSessionIds: readonly SessionId[]
+    readonly archivedAt: WorkspaceArchiveTimes
+    readonly archivedDeletionAt: WorkspaceArchiveTimes
+  }
   | { readonly type: 'pinned'; readonly pinnedSessionIds: readonly SessionId[] }
 
 /** Workspace state stream; every generation starts with exactly one baseline. */

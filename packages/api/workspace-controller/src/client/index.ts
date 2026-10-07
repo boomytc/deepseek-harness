@@ -15,8 +15,11 @@ export { ClientWorkspaceModel } from './model.ts'
 export type {
   WorkspaceFollowSink, WorkspaceListPhase, WorkspaceRemote, WorkspaceSnapshot,
 } from './model.ts'
-export { WorkspaceArchiveError, WorkspaceController, WorkspaceCreateError } from './service.ts'
+export { WorkspaceArchiveError, WorkspaceController, WorkspaceCreateError, WorkspaceSessionDeleteError } from './service.ts'
 export type { IWorkspaces, WorkspaceSource } from './service.ts'
+// The retention arithmetic is shared, not restated: the Host decides with it
+// and the archived list dates its rows with it.
+export { deletionDue, deletionEligibleAt } from '../retention.ts'
 export type {
   SessionActivity, SessionActivityItem, SessionActivityKind, SessionActivityKindMap, WorkspaceId,
   WorkspaceView,
@@ -108,7 +111,11 @@ function acceptIncrement(accept: WorkspaceFollowSink, frame: WorkspaceFollowIncr
       accept.replaceOrder(frame.workspaceIds)
       return
     case 'archived':
-      accept.replaceArchived({ archivedSessionIds: frame.archivedSessionIds, archivedAt: frame.archivedAt })
+      accept.replaceArchived({
+        archivedSessionIds: frame.archivedSessionIds,
+        archivedAt: frame.archivedAt,
+        archivedDeletionAt: frame.archivedDeletionAt,
+      })
       return
     case 'pinned':
       accept.replacePinned(frame.pinnedSessionIds)

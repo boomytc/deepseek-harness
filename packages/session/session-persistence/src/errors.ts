@@ -102,6 +102,25 @@ export class SessionPersistenceCorruptionError extends Error {
 }
 
 /**
+ * A removal found the Session in use: something still holds it, so deleting
+ * its artifacts would strand that holder (or let a writer append into files
+ * that no longer have a name).
+ */
+export class SessionPersistenceBusyError extends Error {
+  /**
+   * @param sessionId - the Session whose removal was refused.
+   * @param holder - what still holds it: an open handle in this process, a
+   *   write owner in another process, or an in-flight storage operation.
+   */
+  constructor(readonly sessionId: SessionId, readonly holder: 'handle' | 'lease') {
+    super(holder === 'handle'
+      ? `session "${sessionId}" is open in this process; close it before removing the session`
+      : `session "${sessionId}" is write-owned by another process; close it there before removing the session`)
+    this.name = 'SessionPersistenceBusyError'
+  }
+}
+
+/**
  * The stored log is intact but this runtime cannot faithfully interpret it:
  * the header carries an unsupported format version, or an event's type is
  * unknown to this build. Distinct from {@link SessionPersistenceCorruptionError}

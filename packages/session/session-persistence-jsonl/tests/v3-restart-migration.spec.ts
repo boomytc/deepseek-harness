@@ -96,4 +96,22 @@ describe.each(['none', 'zstd'] as const)('V3 interrupted-turn publication (%s)',
       compression === 'none' ? 'session.v3.jsonl' : 'session.v3.jsonl.zstd',
     ])
   })
+
+  it('removes the whole session directory, including the migrated source generation', async () => {
+    const f = await fixture()
+    const directory = dirname(f.path)
+    const ctx = await f.mount()
+    const reader = await ctx.sessionPersistence.open(f.id, 'read')
+    await reader.read()
+    await reader.close()
+    // A write open publishes a current-generation successor beside the v3
+    // source, so removing only the generation this backend reports would leave
+    // the original log behind.
+    const writer = await ctx.sessionPersistence.open(f.id, 'write')
+    await writer.close()
+    expect((await readdir(directory)).length).toBeGreaterThan(1)
+
+    await expect(ctx.sessionPersistence.remove(f.id)).resolves.toEqual({ removed: true })
+    await expect(readdir(directory)).rejects.toThrow(/ENOENT/)
+  })
 })

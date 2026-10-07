@@ -1,6 +1,7 @@
 /**
  * Archived sessions settings plugin, browser half: the section that lists the
- * registry-global archive set with a per-row Open and Restore, registered into
+ * registry-global archive set with a per-row Open, Restore, and Delete, plus
+ * one bulk deletion of everything past its retention window, registered into
  * the Settings dialog's section list.
  *
  * The page owns no read of its own — the injected source follows the Session
@@ -53,6 +54,8 @@ export function apply(ctx: ClientContext): void {
     // closes onto a real main-view reference rather than a bare id.
     openSession: (sessionId) => { ctx.uiWorkspace.openSession(sessionId) },
     restoreSession: sessionId => ctx.uiWorkspace.unarchiveSession(sessionId),
+    deleteSession: sessionId => ctx.uiWorkspace.deleteArchivedSession(sessionId),
+    deleteExpiredSessions: () => ctx.uiWorkspace.deleteExpiredArchivedSessions(),
   })
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',

@@ -2,11 +2,11 @@
  * Observable rows behind the Archived sessions settings page.
  *
  * The page manages the registry-global archive set, while the facts a row
- * shows — title, Workspace, archive instant — live in the Session list and
- * the archive timetable, and those streams publish independently. This source
- * re-projects on either change, so the page renders one settled list per state
- * and never reads a Session body: an archived Session stays untouched until
- * the user opens it.
+ * shows — title, Workspace, archive instant, and when the Host would let it be
+ * deleted — live in the Session list and the archive timetable, and those
+ * streams publish independently. This source re-projects on either change, so
+ * the page renders one settled list per state and never reads a Session body:
+ * an archived Session stays untouched until the user opens it.
  */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -29,6 +29,11 @@ export interface ArchivedSessionRow {
    * while a client holds a record the Host has not stamped yet.
    */
   readonly archivedAt: number | undefined
+  /**
+   * When the Host would accept deleting this Session, epoch milliseconds;
+   * absent when the Host published none for it.
+   */
+  readonly eligibleAt: number | undefined
 }
 
 /** Row source and teardown the page registration injects. */
@@ -42,7 +47,7 @@ export interface ArchivedSessionsSource {
 /**
  * Project the archive set through the Session list and the Workspace grouping.
  * @param sessions - Session list snapshot.
- * @param workspaces - Workspace snapshot carrying the archive set, its instants, and grouping.
+ * @param workspaces - Workspace snapshot carrying the archive set, its instants, its deletion instants, and grouping.
  * @returns archived rows, newest update first.
  */
 function project(sessions: SessionListState, workspaces: WorkspaceSnapshot): readonly ArchivedSessionRow[] {
@@ -53,12 +58,14 @@ function project(sessions: SessionListState, workspaces: WorkspaceSnapshot): rea
     const summary = sessions.byId[sessionId]
     if (summary === undefined) continue
     const archivedAt = workspaces.archivedAt[sessionId]
+    const deletionAt = workspaces.archivedDeletionAt[sessionId]
     rows.push({
       sessionId,
       title: summary.displayTitle,
       workspace: workspaces.items.find(item => item.sessionIds.includes(sessionId))?.title,
       updatedAt: summary.updatedAt,
       archivedAt: archivedAt === undefined ? undefined : Date.parse(archivedAt),
+      eligibleAt: deletionAt === undefined ? undefined : Date.parse(deletionAt),
     })
   }
   return rows.sort((left, right) => right.updatedAt - left.updatedAt)
@@ -85,7 +92,7 @@ export function createArchivedSessionsSource(
       const candidate = next[index] as ArchivedSessionRow
       return row.sessionId === candidate.sessionId && row.title === candidate.title
         && row.workspace === candidate.workspace && row.updatedAt === candidate.updatedAt
-        && row.archivedAt === candidate.archivedAt
+        && row.archivedAt === candidate.archivedAt && row.eligibleAt === candidate.eligibleAt
     })) return
     store.set(next)
   }

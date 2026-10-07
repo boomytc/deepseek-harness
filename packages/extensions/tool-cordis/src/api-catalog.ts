@@ -2131,6 +2131,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'options', description: 'optional cancellation.' }],
         returns: 'one snapshot per stored session.',
       },
+      {
+        signature: 'abstract remove(id: SessionId, options?: SessionPersistenceRemoveOptions): Promise<SessionRemovalResult>',
+        description: 'Delete one stored session\'s durable artifacts irreversibly: its log in every retained format generation, together with any session-local artifact the backend keeps beside it.\n\nRemoval is the one operation callers must aim at a session nothing else uses. It refuses while this process holds any handle for the id — a reader included — and while another process holds the session\'s write ownership, so a writer can never append into files this call unlinked. Once it resolves, `stat`, `list`, and `open` report the session as absent, and a later `create` with the same id starts an unrelated lifecycle.\n\nBackends remove only what belongs to that session. Content-addressed artifacts shared across sessions (attachments, for one) are not this service\'s to delete and survive.',
+        parameters: [{ name: 'id', description: 'the stored session to delete.' }, { name: 'options', description: 'optional cancellation.' }],
+        returns: 'whether a stored session was removed.',
+        throws: ['{SessionPersistenceBusyError} while the session is in use.'],
+      },
     ],
   },
   {
@@ -3642,6 +3649,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the complete resulting archive set.',
       },
       {
+        signature: '@Remote(\'deleteArchivedSession\') deleteArchivedSession(request: WorkspaceDeleteArchivedSessionRequest): Promise<WorkspaceArchiveValue>',
+        description: 'Delete one archived Session\'s stored log once its retention window closed.',
+        parameters: [{ name: 'request', description: 'Session identity to delete.' }],
+        returns: 'the complete resulting archive set.',
+      },
+      {
+        signature: '@Remote(\'deleteExpiredArchivedSessions\') deleteExpiredArchivedSessions(): Promise<WorkspaceArchiveValue>',
+        description: 'Delete every archived Session whose retention window closed.',
+        parameters: [],
+        returns: 'the complete resulting archive set.',
+      },
+      {
         signature: '@Remote(\'pinSession\') pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue>',
         description: 'Surface one known unarchived Session ahead of unpinned Sessions.',
         parameters: [{ name: 'request', description: 'Session identity to pin.' }],
@@ -3762,6 +3781,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'unpinSession(sessionId: SessionId): Promise<void>',
         description: 'Unpin one session durably by dropping it from the registry-global pin set. Unpinning runs no session-existence check because removing an id cannot introduce an unknown one, so an entry whose session is gone still resolves. An id that is not pinned resolves without writing.',
         parameters: [{ name: 'sessionId', description: 'The session to unpin.' }],
+        returns: 'resolution after durability.',
+      },
+      {
+        signature: 'forgetSession(sessionId: SessionId): Promise<void>',
+        description: 'Forget one session everywhere this registry names it: the archive set and its archive instant, the pin set, and every workspace\'s session accounting. The stored log is not this registry\'s to remove — callers that deleted it call this to drop the references, while callers that only want it out of the sidebar archive it instead.\n\nThe archive-set write commits first, so an interrupted call leaves an unaccounted session rather than a row naming one nothing can open. An id no set and no workspace names resolves without writing, and the call runs no session-existence probe: dropping references cannot introduce an unknown one.',
+        parameters: [{ name: 'sessionId', description: 'the session to forget.' }],
         returns: 'resolution after durability.',
       },
       {
@@ -6877,6 +6902,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionPersistenceOpenOptions {\n    readonly signal?: AbortSignal;\n}',
   },
   {
+    name: 'SessionPersistenceRemoveOptions',
+    declaration: 'export interface SessionPersistenceRemoveOptions {\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
     name: 'SessionPersistenceRevision',
     declaration: 'export type SessionPersistenceRevision = Branded<\'SessionPersistenceRevision\'>;',
   },
@@ -6947,6 +6976,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionReferenceMentionCandidate',
     declaration: 'export interface SessionReferenceMentionCandidate extends SessionReferenceCandidate {\n    mention: string;\n}',
+  },
+  {
+    name: 'SessionRemovalResult',
+    declaration: 'export type SessionRemovalResult = {\n    readonly removed: true;\n} | {\n    readonly removed: false;\n    readonly code: \'session_not_found\';\n};',
   },
   {
     name: 'SessionRenameRequest',
@@ -8270,11 +8303,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceArchiveValue',
-    declaration: 'export interface WorkspaceArchiveValue {\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n}',
+    declaration: 'export interface WorkspaceArchiveValue {\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n    readonly archivedDeletionAt: WorkspaceArchiveTimes;\n}',
   },
   {
     name: 'WorkspaceBaseline',
-    declaration: 'export interface WorkspaceBaseline {\n    readonly items: readonly WorkspaceView[];\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n    readonly pinnedSessionIds: readonly SessionId[];\n}',
+    declaration: 'export interface WorkspaceBaseline {\n    readonly items: readonly WorkspaceView[];\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n    readonly archivedDeletionAt: WorkspaceArchiveTimes;\n    readonly pinnedSessionIds: readonly SessionId[];\n}',
   },
   {
     name: 'WorkspaceByteRange',
@@ -8299,6 +8332,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceCreateValue',
     declaration: 'export interface WorkspaceCreateValue {\n    readonly workspace: WorkspaceView;\n    readonly created: boolean;\n}',
+  },
+  {
+    name: 'WorkspaceDeleteArchivedSessionRequest',
+    declaration: 'export interface WorkspaceDeleteArchivedSessionRequest {\n    readonly sessionId: SessionId;\n}',
   },
   {
     name: 'WorkspaceDeleteRequest',
@@ -8358,7 +8395,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceFollowIncrement',
-    declaration: 'export type WorkspaceFollowIncrement = {\n    readonly type: \'upsert\';\n    readonly workspace: WorkspaceView;\n} | {\n    readonly type: \'remove\';\n    readonly workspaceId: WorkspaceId;\n} | {\n    readonly type: \'order\';\n    readonly workspaceIds: readonly WorkspaceId[];\n} | {\n    readonly type: \'archived\';\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n} | {\n    readonly type: \'pinned\';\n    readonly pinnedSessionIds: readonly SessionId[];\n};',
+    declaration: 'export type WorkspaceFollowIncrement = {\n    readonly type: \'upsert\';\n    readonly workspace: WorkspaceView;\n} | {\n    readonly type: \'remove\';\n    readonly workspaceId: WorkspaceId;\n} | {\n    readonly type: \'order\';\n    readonly workspaceIds: readonly WorkspaceId[];\n} | {\n    readonly type: \'archived\';\n    readonly archivedSessionIds: readonly SessionId[];\n    readonly archivedAt: WorkspaceArchiveTimes;\n    readonly archivedDeletionAt: WorkspaceArchiveTimes;\n} | {\n    readonly type: \'pinned\';\n    readonly pinnedSessionIds: readonly SessionId[];\n};',
   },
   {
     name: 'WorkspaceInsertBeforeRequest',

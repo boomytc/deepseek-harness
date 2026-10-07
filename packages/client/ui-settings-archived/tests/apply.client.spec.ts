@@ -32,7 +32,7 @@ const sessionState = (items: readonly SessionSummary[]): SessionListState => ({
 })
 
 const workspaceSnapshot = (archivedSessionIds: readonly SessionId[]): WorkspaceSnapshot => ({
-  items: [], archivedSessionIds, archivedAt: {}, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+  items: [], archivedSessionIds, archivedAt: {}, archivedDeletionAt: {}, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
 })
 
 async function bench() {
@@ -50,8 +50,18 @@ async function bench() {
   ctx.provide('workspaces', { list: workspaces } as never)
   const openSession = vi.fn()
   const unarchiveSession = vi.fn(async () => {})
-  ctx.provide('uiWorkspace', { openSession, unarchiveSession } as never)
-  return { ctx, locale, sessions, workspaces, openSession, unarchiveSession }
+  const deleteArchivedSession = vi.fn(async () => {})
+  const deleteExpiredArchivedSessions = vi.fn(async () => {})
+  ctx.provide('uiWorkspace', {
+    openSession,
+    unarchiveSession,
+    deleteArchivedSession,
+    deleteExpiredArchivedSessions,
+  } as never)
+  return {
+    ctx, locale, sessions, workspaces, openSession, unarchiveSession,
+    deleteArchivedSession, deleteExpiredArchivedSessions,
+  }
 }
 
 /** Declare the Settings section list the page registers into. */
@@ -103,7 +113,7 @@ describe('ui-settings-archived apply', () => {
     expect(b.locale.bind('settings.archived')('nav')).toBe('Archived')
   })
 
-  it('projects the archive set and routes both row actions through navigation', async () => {
+  it('projects the archive set and routes every row action through navigation', async () => {
     const b = await bench()
     declareSettings(b.ctx.get('slots') as SlotRegistry)
     await b.ctx.plugin({ inject: [...inject], apply }).await()
@@ -114,12 +124,23 @@ describe('ui-settings-archived apply', () => {
     b.sessions.set(sessionState([summary('gone', 7)]))
     b.workspaces.set(workspaceSnapshot([sid('gone')]))
     expect(face.hooks.rows.getSnapshot()).toEqual([
-      { sessionId: sid('gone'), title: 'gone', workspace: undefined, updatedAt: 7 },
+      {
+        sessionId: sid('gone'),
+        title: 'gone',
+        workspace: undefined,
+        updatedAt: 7,
+        archivedAt: undefined,
+        eligibleAt: undefined,
+      },
     ])
 
     face.openSession(sid('gone'))
     expect(b.openSession).toHaveBeenCalledExactlyOnceWith(sid('gone'))
     await face.restoreSession(sid('gone'))
     expect(b.unarchiveSession).toHaveBeenCalledExactlyOnceWith(sid('gone'))
+    await face.deleteSession(sid('gone'))
+    expect(b.deleteArchivedSession).toHaveBeenCalledExactlyOnceWith(sid('gone'))
+    await face.deleteExpiredSessions()
+    expect(b.deleteExpiredArchivedSessions).toHaveBeenCalledOnce()
   })
 })

@@ -495,6 +495,10 @@ describe('SessionObservationReader cold path', () => {
         return Promise.reject(new Error('not used'))
       }
 
+      remove(): Promise<never> {
+        return Promise.reject(new Error('SwapPersistence does not implement removal'))
+      }
+
       // Appends are durable on resolution here; nothing buffers, so the service-wide flush is a no-op.
       async flush(): Promise<void> {}
 

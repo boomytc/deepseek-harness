@@ -391,6 +391,19 @@ Host service backing the generated `ctx.remote.workspace` namespace.
 @Remote('unarchiveSession') unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue>
 
 /**
+ * Delete one archived Session's stored log once its retention window closed.
+ * @param request - Session identity to delete.
+ * @returns the complete resulting archive set.
+ */
+@Remote('deleteArchivedSession') deleteArchivedSession(request: WorkspaceDeleteArchivedSessionRequest): Promise<WorkspaceArchiveValue>
+
+/**
+ * Delete every archived Session whose retention window closed.
+ * @returns the complete resulting archive set.
+ */
+@Remote('deleteExpiredArchivedSessions') deleteExpiredArchivedSessions(): Promise<WorkspaceArchiveValue>
+
+/**
  * Surface one known unarchived Session ahead of unpinned Sessions.
  * @param request - Session identity to pin.
  * @returns the complete resulting pin set, most recently pinned first.
@@ -590,6 +603,23 @@ pinSession(sessionId: SessionId): Promise<void>
  * @returns resolution after durability.
  */
 unpinSession(sessionId: SessionId): Promise<void>
+
+/**
+ * Forget one session everywhere this registry names it: the archive set and
+ * its archive instant, the pin set, and every workspace's session
+ * accounting. The stored log is not this registry's to remove — callers
+ * that deleted it call this to drop the references, while callers that only
+ * want it out of the sidebar archive it instead.
+ *
+ * The archive-set write commits first, so an interrupted call leaves an
+ * unaccounted session rather than a row naming one nothing can open. An id
+ * no set and no workspace names resolves without writing, and the call runs
+ * no session-existence probe: dropping references cannot introduce an
+ * unknown one.
+ * @param sessionId - the session to forget.
+ * @returns resolution after durability.
+ */
+forgetSession(sessionId: SessionId): Promise<void>
 
 /**
  * Resolve by canonical directory path without creating or mutating a

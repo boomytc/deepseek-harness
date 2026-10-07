@@ -59,6 +59,7 @@ const workspaceState = {
   items: [],
   archivedSessionIds: [],
   archivedAt: {},
+  archivedDeletionAt: {},
   pinnedSessionIds: [],
   state: 'idle' as const,
   phase: 'ready' as const,

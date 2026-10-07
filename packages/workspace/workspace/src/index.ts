@@ -478,6 +478,39 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * Forget one session everywhere this registry names it: the archive set and
+   * its archive instant, the pin set, and every workspace's session
+   * accounting. The stored log is not this registry's to remove — callers
+   * that deleted it call this to drop the references, while callers that only
+   * want it out of the sidebar archive it instead.
+   *
+   * The archive-set write commits first, so an interrupted call leaves an
+   * unaccounted session rather than a row naming one nothing can open. An id
+   * no set and no workspace names resolves without writing, and the call runs
+   * no session-existence probe: dropping references cannot introduce an
+   * unknown one.
+   * @param sessionId - the session to forget.
+   * @returns resolution after durability.
+   */
+  forgetSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      // The chain slot serializes against every other registry write, so these
+      // check-then-write pairs cannot interleave with a concurrent archive.
+      const state = this.requireState()
+      const sets = state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)
+      if (sets) {
+        await this.setState({
+          ...state,
+          archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+          archivedAt: withoutKey(state.archivedAt, sessionId),
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+        })
+      }
+      for (const workspace of this.list()) await workspace.detachSession(sessionId)
+    })
+  }
+
+  /**
    * Whether a session is live, header-indexed, or present in a fresh
    * persistence listing. Only a definite miss returns false — a failing
    * `sessionPersistence.list()` propagates so storage faults never

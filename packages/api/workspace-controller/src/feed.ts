@@ -9,6 +9,7 @@ import {
   workspaceRecord,
   WorkspaceId,
 } from '@deepseek-ai/dsh-workspace'
+import { deletionTimes } from './retention.ts'
 import type {
   WorkspaceArchiveTimes,
   WorkspaceBaseline,
@@ -53,8 +54,11 @@ export class WorkspaceFeed {
   private archivedAt: WorkspaceArchiveTimes = {}
   private pinned: readonly string[]
 
-  /** @param ctx - Host context containing the authoritative Workspace registry. */
-  constructor(private readonly ctx: Context) {
+  /**
+   * @param ctx - Host context containing the authoritative Workspace registry.
+   * @param archivedRetentionDays - retention window the deletion instants are derived from.
+   */
+  constructor(private readonly ctx: Context, private readonly archivedRetentionDays: number) {
     const baseline = ctx.workspaceRegistry.list()
     this.knownIds = new Set(baseline.map(workspace => String(workspace.id)))
     this.order = baseline.map(workspace => String(workspace.id))
@@ -77,6 +81,7 @@ export class WorkspaceFeed {
       items: this.ctx.workspaceRegistry.list().map(workspaceView),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
       archivedAt: { ...this.ctx.workspaceRegistry.archivedAt },
+      archivedDeletionAt: deletionTimes(this.ctx.workspaceRegistry.archivedAt, this.archivedRetentionDays),
       pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds],
     }
   }
@@ -118,13 +123,16 @@ export class WorkspaceFeed {
       this.order = nextOrder
       if (orderChanged) this.publish({ type: 'order', workspaceIds: [...state.workspaceIds] })
       const nextArchived = state.archivedSessionIds.map(String)
-      if (!sameStrings(this.archived, nextArchived) || !sameTimes(this.archivedAt, state.archivedAt)) {
+      const nextDeletionAt = deletionTimes(state.archivedAt, this.archivedRetentionDays)
+      if (!sameStrings(this.archived, nextArchived)
+        || !sameTimes(this.archivedAt, state.archivedAt)) {
         this.archived = nextArchived
         this.archivedAt = state.archivedAt
         this.publish({
           type: 'archived',
           archivedSessionIds: [...state.archivedSessionIds],
           archivedAt: state.archivedAt,
+          archivedDeletionAt: nextDeletionAt,
         })
       }
       const nextPinned = state.pinnedSessionIds.map(String)

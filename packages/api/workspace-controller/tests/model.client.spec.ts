@@ -6,6 +6,7 @@ import type {
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
+  WorkspaceDeleteArchivedSessionRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
@@ -51,14 +52,29 @@ function remoteOk<T>(value: T): RemoteResult<T> {
 /** One fixed archive instant, so an assertion on it never depends on the clock. */
 const ARCHIVED_AT = '2026-09-02T00:00:00.000Z'
 
+/** One fixed deletion instant, three days after {@link ARCHIVED_AT}. */
+const ARCHIVED_DELETED_AT = '2026-09-05T00:00:00.000Z'
+
 /** Archive instants for a set of Session ids, as the Host publishes them. */
 function archiveTimes(sessionIds: readonly SessionId[]): Readonly<Record<string, string>> {
   return Object.fromEntries(sessionIds.map(id => [id, ARCHIVED_AT]))
 }
 
-/** Complete Host archive value for a set of Session ids. */
+/** Deletion instants for a set of Session ids, as the Host derives them. */
+function deletedTimes(sessionIds: readonly SessionId[]): Readonly<Record<string, string>> {
+  return Object.fromEntries(sessionIds.map(id => [id, ARCHIVED_DELETED_AT]))
+}
+
+/**
+ * Complete Host archive value for a set of Session ids. Deletion instants are
+ * derived, so this fixture dates them a fixed day after the archive instant.
+ */
 function archiveValue(sessionIds: readonly SessionId[]): WorkspaceArchiveValue {
-  return { archivedSessionIds: sessionIds, archivedAt: archiveTimes(sessionIds) }
+  return {
+    archivedSessionIds: sessionIds,
+    archivedAt: archiveTimes(sessionIds),
+    archivedDeletionAt: deletedTimes(sessionIds),
+  }
 }
 
 function workspaceError(error: RemoteFailure): RemoteResult<never> {
@@ -107,6 +123,12 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     request: WorkspaceUnarchiveSessionRequest,
   ) => Promise<RemoteResult<WorkspaceArchiveValue>> = request =>
     Promise.resolve(remoteOk(archiveValue([request.sessionId])))
+  onDeleteArchivedSession: (
+    request: WorkspaceDeleteArchivedSessionRequest,
+  ) => Promise<RemoteResult<WorkspaceArchiveValue>> = request =>
+    Promise.resolve(remoteOk(archiveValue([request.sessionId])))
+  onDeleteExpiredArchivedSessions: () => Promise<RemoteResult<WorkspaceArchiveValue>> = () =>
+    Promise.resolve(remoteOk(archiveValue([])))
   onPinSession: (
     request: WorkspacePinSessionRequest,
   ) => Promise<RemoteResult<WorkspacePinValue>> = request =>
@@ -151,6 +173,16 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     return this.onUnarchiveSession(request)
   }
 
+  deleteArchivedSession(request: WorkspaceDeleteArchivedSessionRequest): Promise<RemoteResult<WorkspaceArchiveValue>> {
+    this.record('deleteArchivedSession', request)
+    return this.onDeleteArchivedSession(request)
+  }
+
+  deleteExpiredArchivedSessions(): Promise<RemoteResult<WorkspaceArchiveValue>> {
+    this.record('deleteExpiredArchivedSessions', {})
+    return this.onDeleteExpiredArchivedSessions()
+  }
+
   pinSession(request: WorkspacePinSessionRequest): Promise<RemoteResult<WorkspacePinValue>> {
     this.record('pinSession', request)
     return this.onPinSession(request)
@@ -180,7 +212,13 @@ function baseline(
   archivedSessionIds: readonly SessionId[] = [],
   pinnedSessionIds: readonly SessionId[] = [],
 ): void {
-  model.replaceBaseline({ items, archivedSessionIds, archivedAt: archiveTimes(archivedSessionIds), pinnedSessionIds })
+  model.replaceBaseline({
+    items,
+    archivedSessionIds,
+    archivedAt: archiveTimes(archivedSessionIds),
+    archivedDeletionAt: deletedTimes(archivedSessionIds),
+    pinnedSessionIds,
+  })
 }
 
 describe('ClientWorkspaceModel', () => {
@@ -454,20 +492,89 @@ describe('ClientWorkspaceModel', () => {
 
   it('republishes a held archive set when only its instants change', () => {
     const model = modelFor()
-    model.replaceArchived({ archivedSessionIds: [sid('first')], archivedAt: { first: '2026-09-01T00:00:00.000Z' } })
+    model.replaceArchived({
+      archivedSessionIds: [sid('first')],
+      archivedAt: { first: '2026-09-01T00:00:00.000Z' },
+      archivedDeletionAt: { first: '2026-09-04T00:00:00.000Z' },
+    })
     const stamped = model.getSnapshot()
 
-    // The same id with a newer instant still publishes: the archived page
-    // dates its rows from these values.
-    model.replaceArchived({ archivedSessionIds: [sid('first')], archivedAt: { first: ARCHIVED_AT } })
+    // The same id with newer instants still publishes: the archived page dates
+    // its rows from these values.
+    model.replaceArchived(archiveValue([sid('first')]))
 
     expect(model.getSnapshot()).not.toBe(stamped)
     expect(model.getSnapshot().archivedAt).toEqual({ first: ARCHIVED_AT })
+    expect(model.getSnapshot().archivedDeletionAt).toEqual({ first: ARCHIVED_DELETED_AT })
 
     // An identical value leaves the published snapshot alone.
     const settled = model.getSnapshot()
-    model.replaceArchived({ archivedSessionIds: [sid('first')], archivedAt: { first: ARCHIVED_AT } })
+    model.replaceArchived(archiveValue([sid('first')]))
     expect(model.getSnapshot()).toBe(settled)
+  })
+
+  it('deletes an archived Session, installing the returned set and its superseded reply', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [], [sid('doomed'), sid('kept')])
+
+    const gate = deferred<RemoteResult<WorkspaceArchiveValue>>()
+    remote.onDeleteArchivedSession = () => gate.promise
+    const pending = model.deleteArchivedSession(sid('doomed'))
+    // A pushed set supersedes the reply in flight, exactly as a restore does.
+    model.replaceArchived(archiveValue([sid('kept')]))
+    gate.resolve(remoteOk(archiveValue([])))
+    await expect(pending).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().archivedSessionIds).toEqual(['kept'])
+
+    remote.onDeleteExpiredArchivedSessions = () => Promise.resolve(remoteOk(archiveValue([])))
+    await expect(model.deleteExpiredArchivedSessions()).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().archivedSessionIds).toEqual([])
+    expect(remote.calls).toContainEqual({ method: 'deleteArchivedSession', request: { sessionId: 'doomed' } })
+    expect(remote.calls).toContainEqual({ method: 'deleteExpiredArchivedSessions', request: {} })
+  })
+
+  it('keeps the latest deletion reply when overlapping requests settle out of order', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [], [sid('first'), sid('second')])
+    const firstGate = deferred<RemoteResult<WorkspaceArchiveValue>>()
+    const secondGate = deferred<RemoteResult<WorkspaceArchiveValue>>()
+    let request = 0
+    remote.onDeleteArchivedSession = () => request++ === 0 ? firstGate.promise : secondGate.promise
+
+    const first = model.deleteArchivedSession(sid('first'))
+    const second = model.deleteArchivedSession(sid('second'))
+    secondGate.resolve(remoteOk(archiveValue([])))
+    await expect(second).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().archivedSessionIds).toEqual([])
+    // The superseded reply installs nothing, even though it lands later.
+    firstGate.resolve(remoteOk(archiveValue([sid('second')])))
+    await expect(first).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().archivedSessionIds).toEqual([])
+
+    // The bulk command follows the same supersede rule.
+    const bulkGate = deferred<RemoteResult<WorkspaceArchiveValue>>()
+    remote.onDeleteExpiredArchivedSessions = () => bulkGate.promise
+    const bulk = model.deleteExpiredArchivedSessions()
+    model.replaceArchived(archiveValue([sid('third')]))
+    bulkGate.resolve(remoteOk(archiveValue([])))
+    await expect(bulk).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().archivedSessionIds).toEqual(['third'])
+  })
+
+  it('keeps a refused deletion visible and installs the baseline deletion instants', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [], [sid('held')])
+    remote.onDeleteArchivedSession = () => Promise.resolve(workspaceError(
+      new RemoteError('workspace/session-busy', 'held', { sessionId: sid('held'), holder: 'lease' }),
+    ))
+    await expect(model.deleteArchivedSession(sid('held'))).resolves.toMatchObject({ ok: false })
+    expect(model.getSnapshot().archivedSessionIds).toEqual(['held'])
+
+    // The baseline carries the deletion instants the Host derived.
+    expect(model.getSnapshot().archivedDeletionAt).toEqual({ held: ARCHIVED_DELETED_AT })
   })
 
   it('applies pin mutation echoes and leaves failed results unchanged', async () => {

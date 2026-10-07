@@ -12,6 +12,7 @@ import type {
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
+  WorkspaceDeleteArchivedSessionRequest,
   WorkspaceDeleteRequest,
   WorkspaceDeleteValue,
   WorkspaceFollowFrame,
@@ -29,16 +30,21 @@ import type {
 export type * from './types.ts'
 export { DirectoryPickerController } from './directory-picker.ts'
 
-/** First-use directory policy for the Host account. */
+/** First-use directory policy for the Host account, and the policy that retires archived Sessions. */
 export interface Config {
   /** Override the system Documents directory with a fully qualified path. */
   documentsDirectory?: string
   /** Maximum duration of the operating system's Documents lookup. */
   documentsLookupTimeoutMs?: number
+  /**
+   * Whole days an archived Session stays undeletable. `0` lets the archived
+   * list delete a Session the moment a person archives it.
+   */
+  archivedRetentionDays?: number
 }
 
 /** Directory policy after schema defaults have been applied. */
-type ResolvedConfig = Config & { documentsLookupTimeoutMs: number }
+type ResolvedConfig = Config & { documentsLookupTimeoutMs: number; archivedRetentionDays: number }
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -49,11 +55,12 @@ declare module '@deepseek-ai/cordis' {
 
 /** Host service backing the generated `ctx.remote.workspace` namespace. */
 export class WorkspaceController extends TypertRemoteService {
-  static inject = ['typert', 'workspaceRegistry']
+  static inject = ['typert', 'workspaceRegistry', 'sessionPersistence']
 
   static Config: z<Config, ResolvedConfig> = z.object({
     documentsDirectory: z.string(),
     documentsLookupTimeoutMs: z.natural().min(1).default(10_000),
+    archivedRetentionDays: z.natural().default(3),
   })
 
   private readonly config: ResolvedConfig
@@ -62,14 +69,14 @@ export class WorkspaceController extends TypertRemoteService {
 
   /**
    * @param ctx - Host context containing the Workspace registry.
-   * @param config - first-use directory policy.
+   * @param config - first-use directory policy and archive retention window.
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'workspaceController', { namespace: 'workspace' })
     this.config = WorkspaceController.Config(config)
     if (this.config.documentsDirectory !== undefined) validateDocumentsDirectory(this.config.documentsDirectory)
-    this.commands = new WorkspaceCommands(ctx)
-    this.feed = new WorkspaceFeed(ctx)
+    this.commands = new WorkspaceCommands(ctx, this.config.archivedRetentionDays)
+    this.feed = new WorkspaceFeed(ctx, this.config.archivedRetentionDays)
     // This package is the Loader entry for both Remote owners it hosts: the
     // directory-picking seam is abstract and never an entry itself. The child
     // stays pending until a picking backend is composed, so a host without one
@@ -164,6 +171,25 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('unarchiveSession')
   unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     return this.commands.unarchiveSession(request)
+  }
+
+  /**
+   * Delete one archived Session's stored log once its retention window closed.
+   * @param request - Session identity to delete.
+   * @returns the complete resulting archive set.
+   */
+  @Remote('deleteArchivedSession')
+  deleteArchivedSession(request: WorkspaceDeleteArchivedSessionRequest): Promise<WorkspaceArchiveValue> {
+    return this.commands.deleteArchivedSession(request)
+  }
+
+  /**
+   * Delete every archived Session whose retention window closed.
+   * @returns the complete resulting archive set.
+   */
+  @Remote('deleteExpiredArchivedSessions')
+  deleteExpiredArchivedSessions(): Promise<WorkspaceArchiveValue> {
+    return this.commands.deleteExpiredArchivedSessions()
   }
 
   /**

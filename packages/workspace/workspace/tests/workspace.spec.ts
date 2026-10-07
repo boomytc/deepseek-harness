@@ -1476,6 +1476,43 @@ describe('first-use Workspace preparation', () => {
   })
 })
 
+describe('registry-global session forgetting', () => {
+  it('drops an archived Session from the archive set, its instant, and every workspace account', async () => {
+    const dir = await makeDir('forget-archived')
+    const result = await harness({ sessions: [header('gone', dir, 100), header('kept', dir, 200)] })
+    const workspace = result.registry.list()[0]!
+    await result.registry.archiveSession(SessionId('gone'))
+    expect(workspace.sessionIds).toContain('gone')
+
+    await result.registry.forgetSession(SessionId('gone'))
+
+    expect(result.registry.archivedSessionIds).toEqual([])
+    expect(result.registry.archivedAt).toEqual({})
+    expect(workspace.sessionIds).toEqual([SessionId('kept')])
+    const stored = storedState(result.pool)
+    expect(stored.archivedSessionIds).toEqual([])
+    expect(stored.archivedAt).toEqual({})
+    expect(storedRecord(result.pool, workspace.id).sessionIds).toEqual([SessionId('kept')])
+  })
+
+  it('drops a pinned Session, and an id no set and no workspace names writes nothing', async () => {
+    const dir = await makeDir('forget-pinned')
+    const result = await harness({ sessions: [header('pinned', dir, 100)] })
+    const workspace = result.registry.list()[0]!
+    await result.registry.pinSession(SessionId('pinned'))
+
+    await result.registry.forgetSession(SessionId('pinned'))
+    expect(result.registry.pinnedSessionIds).toEqual([])
+    expect(workspace.sessionIds).toEqual([])
+
+    // Idempotent: the id is gone from every set, so neither repeat writes.
+    const changesAfterFirst = result.changes.length
+    await result.registry.forgetSession(SessionId('pinned'))
+    await result.registry.forgetSession(SessionId('never-known'))
+    expect(result.changes.length).toBe(changesAfterFirst)
+  })
+})
+
 // The registry knows no family: the providers merge theirs, and this suite merges its own.
 declare module '@deepseek-ai/dsh-workspace/types' {
   interface SessionActivityKindMap {

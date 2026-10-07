@@ -308,6 +308,12 @@ export interface LaunchOptions {
   developerTools?: boolean
   /** Enable the real Open In rows with deterministic launch-environment facts. */
   openInAppEnvironment?: LaunchEnvironmentSnapshot
+  /**
+   * Whole days an archived Session stays undeletable on this Host, overriding
+   * the shipped three. A deletion scenario sets `0` so an archived Session is
+   * deletable without waiting out the window.
+   */
+  archivedRetentionDays?: number
   /** Compare the replayed root Session; `read-only` also forbids refresh writes to a borrowed fixture. */
   compareReplaySession?: boolean | 'read-only'
   /**
@@ -584,7 +590,17 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // never write the user's harness home.
     { id: 'storage-json', config: { root: join(workspaceCwd, '.dsh-storages') } },
     // First-use initialization must create directories only inside this scaffold's temporary world.
-    { id: 'workspace-controller', config: { documentsDirectory: join(workspaceCwd, 'Documents') } },
+    {
+      id: 'workspace-controller',
+      config: {
+        documentsDirectory: join(workspaceCwd, 'Documents'),
+        // This row is the scaffold's own override, so a scenario cannot reach it
+        // through extraOverlayPath: the later entry replaces the whole config.
+        ...options.archivedRetentionDays === undefined
+          ? {}
+          : { archivedRetentionDays: options.archivedRetentionDays },
+      },
+    },
     // Skill discovery is model-visible input. Pin every host-level root inside
     // the owned temp world so ~/.dsh, ~/.agents, and a bundled-root env setting
     // cannot change replay requests or conversation goldens. Project roots stay

@@ -172,6 +172,44 @@ export class TestWorkspaces implements IWorkspaces {
   }
 
   /**
+   * Delete an archived session (recorded). The default mirrors the production
+   * face's observable effect: the id leaves the list state's archive set and
+   * its archive instant.
+   * @param sessionId - session to delete.
+   */
+  async deleteArchivedSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'deleteArchivedSession', args: [sessionId] })
+    const stub = this.stubs.get('deleteArchivedSession')
+    if (stub !== undefined) {
+      await (stub(sessionId) as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.archivedSessionIds = draft.archivedSessionIds.filter(id => id !== sessionId)
+      draft.archivedAt = Object.fromEntries(
+        Object.entries(draft.archivedAt).filter(([id]) => id !== sessionId),
+      )
+    })
+  }
+
+  /**
+   * Delete every archived session past its window (recorded). The default
+   * mirrors the production face's observable effect: the archive set empties.
+   */
+  async deleteExpiredArchivedSessions(): Promise<void> {
+    this.calls.push({ method: 'deleteExpiredArchivedSessions', args: [] })
+    const stub = this.stubs.get('deleteExpiredArchivedSessions')
+    if (stub !== undefined) {
+      await (stub() as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.archivedSessionIds = []
+      draft.archivedAt = {}
+    })
+  }
+
+  /**
    * Pin a session (recorded). The default mirrors the production face's
    * observable effect: the id leads the list state's pin set.
    * @param sessionId - session to pin.

@@ -408,6 +408,28 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Delete one stored session's durable artifacts irreversibly: its log in
+ * every retained format generation, together with any session-local
+ * artifact the backend keeps beside it.
+ *
+ * Removal is the one operation callers must aim at a session nothing else
+ * uses. It refuses while this process holds any handle for the id — a
+ * reader included — and while another process holds the session's write
+ * ownership, so a writer can never append into files this call unlinked.
+ * Once it resolves, `stat`, `list`, and `open` report the session as absent,
+ * and a later `create` with the same id starts an unrelated lifecycle.
+ *
+ * Backends remove only what belongs to that session. Content-addressed
+ * artifacts shared across sessions (attachments, for one) are not this
+ * service's to delete and survive.
+ * @param id - the stored session to delete.
+ * @param options - optional cancellation.
+ * @returns whether a stored session was removed.
+ * @throws {SessionPersistenceBusyError} while the session is in use.
+ */
+abstract remove(id: SessionId, options?: SessionPersistenceRemoveOptions): Promise<SessionRemovalResult>
 ```
 
 Types: [SessionId](core.zh.md)

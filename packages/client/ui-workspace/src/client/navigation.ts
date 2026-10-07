@@ -30,8 +30,23 @@ interface MainSelection {
 /** Optional content preparation for the resolved target Session. */
 export type StartSessionOptions = DraftInitializationOptions
 
+/**
+ * The Session lifecycle commands whose contract the Workspace Controller
+ * already declares: the UI service forwards them unchanged, so their
+ * documentation stays in one place.
+ */
+export type UiWorkspaceSessionCommands = Pick<
+  IWorkspaces,
+  | 'archiveSession'
+  | 'unarchiveSession'
+  | 'deleteArchivedSession'
+  | 'deleteExpiredArchivedSessions'
+  | 'pinSession'
+  | 'unpinSession'
+>
+
 /** Workspace archive and directory operations consumed by Client UI domains. */
-export interface UiWorkspace {
+export interface UiWorkspace extends UiWorkspaceSessionCommands {
   /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param target - known Session identity or durable direct-parent subagent address to display.
@@ -67,30 +82,6 @@ export interface UiWorkspace {
    * @param options - initial content; existing text or attachments are preserved unless clearPreviousDraft is true.
    */
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void
-  /**
-   * Archive a Session and clear it when it is the current selection.
-   * @param sessionId - Session to archive.
-   * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
-   */
-  archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
-  /**
-   * Unarchive a Session, restoring it to its recorded Workspace position.
-   * @param sessionId - Session to unarchive.
-   */
-  unarchiveSession(sessionId: SessionId): Promise<void>
-  /**
-   * Pin a Session on the Host, then lead it in its accounts' saved orders
-   * (its Workspace group or Ungrouped, and the flat list). The order write
-   * reads the memberships current at completion, so reorders that landed
-   * while the Host call was pending keep their positions.
-   * @param sessionId - Session to pin.
-   */
-  pinSession(sessionId: SessionId): Promise<void>
-  /**
-   * Unpin a Session on the Host; saved positions stay as they are.
-   * @param sessionId - Session to unpin.
-   */
-  unpinSession(sessionId: SessionId): Promise<void>
   /**
    * Open the Host-native directory picker.
    * @returns the selected directory, or null when cancelled.
@@ -277,6 +268,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.unarchiveSession(sessionId)
+  }
+
+  async deleteArchivedSession(sessionId: SessionId): Promise<void> {
+    await this.workspaces.deleteArchivedSession(sessionId)
+  }
+
+  async deleteExpiredArchivedSessions(): Promise<void> {
+    await this.workspaces.deleteExpiredArchivedSessions()
   }
 
   async pinSession(sessionId: SessionId): Promise<void> {

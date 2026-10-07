@@ -8,6 +8,7 @@ import { scheduler } from 'node:timers/promises'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import { SessionPersistenceBusyError } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
   assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath,
@@ -20,6 +21,7 @@ import {
 import { runLiveWritePathContract } from '../../session-persistence/tests/live-write-contract.ts'
 import { LIVE_WRITE_BATCH_MAX_DELAY_MS, type JsonlSessionHandle } from '../src/storage.ts'
 import { JsonlGenerationSourceChangedError } from '../src/generation.ts'
+import { LEASE_FILENAME, SessionWriteLease } from '../src/lease.ts'
 import SessionStore from '@deepseek-ai/dsh-session'
 
 const statRace = vi.hoisted(() => ({
@@ -2045,6 +2047,75 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
 
     await expect(pending).rejects.toBe(reason)
     expect(discovery).toHaveBeenCalledWith(controller.signal)
+  })
+})
+
+describe('JsonlSessionPersistence: removal refusals', () => {
+  /** One materialized session whose write handle is closed again. */
+  async function storedSession(persistence: SessionPersistence, root: string, id: SessionId): Promise<void> {
+    const handle = await persistence.create(meta(String(id)))
+    await handle.append(oneTurnLog())
+    await handle.close()
+    // The lock file survives release, so the directory is where `remove` looks.
+    expect((await readdir(sessionDir(root, undefined, id))).length).toBeGreaterThan(0)
+  }
+
+  it('refuses a Session another lease holds and then removes it', async () => {
+    const root = await freshRoot()
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    const id = SessionId('lease-held-removal')
+    await storedSession(ctx.sessionPersistence, root, id)
+
+    // A lease held with no handle behind it: the exclusion another process
+    // holds, exercised in-process. Nothing about it is visible to the tracker,
+    // so only the kernel lock can refuse this removal.
+    const lease = await SessionWriteLease.acquire(sessionDir(root, undefined, id), id)
+    try {
+      await expect(ctx.sessionPersistence.remove(id)).rejects.toBeInstanceOf(SessionPersistenceBusyError)
+    } finally {
+      await lease.release()
+    }
+    await expect(ctx.sessionPersistence.remove(id)).resolves.toEqual({ removed: true })
+  })
+
+  it('propagates a lock-path failure that is not contention', async () => {
+    const root = await freshRoot()
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    const id = SessionId('broken-lock-path')
+    await storedSession(ctx.sessionPersistence, root, id)
+
+    // A directory where the lock file belongs: acquiring cannot succeed and is
+    // not contention, so the failure reaches the caller unchanged.
+    const lockPath = join(sessionDir(root, undefined, id), LEASE_FILENAME)
+    await rm(lockPath, { force: true })
+    await mkdir(lockPath)
+    await expectCode(ctx.sessionPersistence.remove(id), ['EISDIR', 'EPERM', 'EACCES'])
+    // Nothing was deleted while the removal failed.
+    expect((await ctx.sessionPersistence.list()).map(snapshot => snapshot.header.id)).toContain(id)
+  })
+
+  it('removes a Session while another Session has an open handle', async () => {
+    const root = await freshRoot()
+    const ctx = new Context()
+    liveContexts.push(ctx)
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    const kept = SessionId('open-elsewhere')
+    const doomed = SessionId('removed-beside-it')
+    await storedSession(ctx.sessionPersistence, root, kept)
+    await storedSession(ctx.sessionPersistence, root, doomed)
+
+    const reader = await ctx.sessionPersistence.open(kept, 'read')
+    try {
+      // The open handle belongs to another id, so this one is not claimed.
+      await expect(ctx.sessionPersistence.remove(doomed)).resolves.toEqual({ removed: true })
+      await expect(ctx.sessionPersistence.remove(kept)).rejects.toBeInstanceOf(SessionPersistenceBusyError)
+    } finally {
+      await reader.close()
+    }
   })
 })
 

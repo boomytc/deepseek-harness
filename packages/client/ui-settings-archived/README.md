@@ -25,7 +25,7 @@ The **Archived sessions** page in Settings lists every Session the profile archi
 <a id="use-this-package"></a>
 ## Use this package
 
-Open Settings and select **Archived** between **General** and **Models**; the page titles itself **Archived sessions**. Each row names the Session, its Workspace (or **Ungrouped**), and the date it was archived, formatted in the active language; the list itself stays ordered by last update. **Open** selects that Session in the main view and closes Settings; the conversation renders its full history, while its composer states that the Session is archived instead of accepting input. **Restore** removes the row from the list, and the Session appears in the sidebar again under its Workspace. One restore runs at a time: every row's button is disabled while one is in flight, and a refused restore keeps its row with the reason beside it. An empty set states that nothing is archived.
+Open Settings and select **Archived** between **General** and **Models**; the page titles itself **Archived sessions**. Each row names the Session, its Workspace (or **Ungrouped**), and the date it was archived, formatted in the active language; the list itself stays ordered by last update. **Open** selects that Session in the main view and closes Settings; the conversation renders its full history, while its composer states that the Session is archived instead of accepting input. **Restore** removes the row from the list, and the Session appears in the sidebar again under its Workspace. **Delete** deletes the stored log for good: it stays unavailable, naming the date its window closes, until the row is past the retention window the Host reports, and it runs only on the confirming second press. Above the list, one bulk control deletes every row past its window and names how many that is. One action runs at a time: every row's buttons are disabled while a restore or deletion is in flight, and a refused restore or deletion keeps its row with the reason beside it. An empty set states that nothing is archived.
 
 -----
 
@@ -67,7 +67,8 @@ None; this package neither assembles nor sends a provider request.
 <a id="known-limitations-and-deferred-work"></a>
 
 - **One profile's archive set** — the page lists the registry-global set the connected Host serves, so it shows no other profile's archived Sessions.
-- **No deletion** — Sessions are archived and restored, never deleted; the page therefore offers no destructive action, and its rows stay recoverable.
+- **Deletion waits for the Host's window** — Delete stays unavailable until a row is past the retention window the connected Host reports (three days by default), and the Host checks the same window again before it deletes, so an unavailable button is never the only guard.
+- **An open Session cannot be deleted** — Session storage refuses to remove a log any handle still addresses, and opening an archived Session in the main view holds one. A refused deletion keeps its row with the reason beside it; close that conversation and delete again.
 
 <a id="dev-note"></a>
 ### Dev Note
