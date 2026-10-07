@@ -4,6 +4,7 @@
 - navigation "Global panels":
   - button "Plugins"
   - button "Automation tasks"
+  - button "Skills"
 - text: Workspaces
 - button "Search sessions"
 - textbox "Search session names"

@@ -30,6 +30,11 @@
  *
  * This browser half also owns the `skill` keyed toolview: a replay-stable
  * accent row derived only from each logged call/result slice.
+ *
+ * It also fills the Skills page: the `skills` entry in the sidebar's global
+ * panel list and the page behind it, which lists the catalog of the Session
+ * the main view retains. Both read that one source, whose read is the shared
+ * per-session fetch below.
  */
 // Type-only: the carrier types, the forwarded Host-event face and the ctx.remote merge.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -38,6 +43,9 @@ import type { SkillEntry } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
+// Type-only: the `sidebar.panellist` declaration the entry registers into.
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { rankByName } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -45,6 +53,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { SkillRow } from './SkillRow.tsx'
+import { SkillsPanel, type SkillsPanelInjected } from './SkillsPanel.tsx'
+import { SkillsPanelIcon } from './SkillsPanelIcon.tsx'
+import { createSkillsPanelSource } from './skills-panel-source.ts'
 import { en, NS, zh, type SkillKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
@@ -56,7 +67,7 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** The dedicated skill tool row's copy. */
+    /** The skill feature's copy: the dedicated tool row and the Skills page. */
     skill: SkillKey
   }
 }
@@ -71,6 +82,9 @@ interface CatalogFetch {
 
 /** Required services: reference source faces plus the tool-row and locale registries. */
 export const inject = ['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight']
+
+/** Sidebar entry id and matching main-panel key of the Skills page. */
+const PANEL_ID = 'skills' as MainPanelId
 
 /**
  * Client plugin body: register the '/' source, dictionaries, and keyed tool row.
@@ -90,6 +104,9 @@ export function apply(ctx: ClientContext): void {
   const fetches = new Map<SessionId, CatalogFetch>()
   // Per-session lexicon invalidation listeners (subscribeLexicon consumers).
   const lexiconListeners = new Map<SessionId, Set<() => void>>()
+  // Consumers of a dropped shared fetch — the Skills page re-reads, because a
+  // dropped entry means the Session's composition may have changed.
+  const droppedListeners = new Set<(sessionId: SessionId) => void>()
 
   const notifyLexicon = (sessionId: SessionId): void => {
     for (const listener of [...(lexiconListeners.get(sessionId) ?? [])]) {
@@ -102,6 +119,10 @@ export function apply(ctx: ClientContext): void {
         console.error('[ui-skill] lexicon listener failed:', error)
       }
     }
+  }
+
+  const notifyDropped = (sessionId: SessionId): void => {
+    for (const listener of [...droppedListeners]) listener(sessionId)
   }
 
   const fetchCatalog = (sessionId: SessionId): CatalogFetch => {
@@ -146,6 +167,7 @@ export function apply(ctx: ClientContext): void {
     fetches.delete(key)
     entry.abort.abort()
     notifyLexicon(key)
+    notifyDropped(key)
   }
 
   const clearAll = (): void => {
@@ -155,6 +177,48 @@ export function apply(ctx: ClientContext): void {
   // The bound translate resolves against the registered dictionaries with the
   // locale service's own fallback ladder; candidate-time reads stay plain text.
   const t = ctx.locale.bind(NS)
+
+  const panel = createSkillsPanelSource({
+    list: sessions.list,
+    read: sessionId => fetchCatalog(sessionId).promise,
+    subscribeDropped: (listener) => {
+      droppedListeners.add(listener)
+      return () => { droppedListeners.delete(listener) }
+    },
+  })
+  ctx.effect(() => () => { panel.dispose() }, 'ui-skill: Skills page catalog')
+
+  /**
+   * Open one listed skill's `SKILL.md` in the right Sidebar, addressed to the
+   * Session the list describes. A skill whose provider supplied no file path
+   * has nothing to open.
+   * @param skill - the listed skill whose row was activated.
+   */
+  const openSkill = (skill: SkillEntry): void => {
+    const { sessionId } = panel.hooks.catalog.getSnapshot()
+    if (sessionId === undefined || skill.path === undefined) return
+    const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
+    ctx.sidebarRight.openResource(fileAddressFor(sessionId, cwd, skill.path))
+  }
+
+  const panelInject = (): SkillsPanelInjected => ({
+    hooks: { catalog: panel.hooks.catalog },
+    onRetry: panel.retry,
+    onOpenSkill: openSkill,
+  })
+  ctx.slots.inject('main', () => ctx.slots.register(
+    { name: 'main', key: PANEL_ID, locale: NS, inject: panelInject },
+    SkillsPanel,
+  ))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: PANEL_ID,
+    // After the Plugins (0) and Automation tasks (10) entries: skills are a browsing
+    // surface, not a first-stop destination.
+    order: 20,
+    locale: NS,
+    label: () => t('panel.title'),
+  }, SkillsPanelIcon))
 
   const source: InputTriggerSource = {
     trigger: '/',

@@ -1,5 +1,5 @@
 ---
-description: "dsh Web 客户端的 skill 引用与专属 skill 工具行：/ 触发的 skill source 与 skill 调用卡片。"
+description: "dsh Web 客户端的 skill 引用、专属 skill 工具行与技能页：/ 触发的 skill source、skill 调用卡片与侧边栏目录。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-skill` 让用户通过 `/` 建议选择或直接键入 `/name` 来调用 skill（技能）。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。skill 调用在对话中显示为可展开的 `Instructions` 卡片；即使已安装的 skill 目录发生变化，卡片落定后的内容仍保持稳定。
+`dsh-client-ui-skill` 让用户通过 `/` 建议选择或直接键入 `/name` 来调用 skill（技能）。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。skill 调用在对话中显示为可展开的 `Instructions` 卡片；即使已安装的 skill 目录发生变化，卡片落定后的内容仍保持稳定。同一个插件还填充侧边栏的 `技能`／`Skills` 入口及其背后的页面，列出当前打开的 Session 可用的 skill。
 
 ## 目录
 
@@ -39,6 +39,10 @@ kind: "package-reference"
 
 鼠标移入 `/name` 时，背景覆盖整个引用。点击已知 skill 会在右侧栏打开提供方给出的 `SKILL.md` 路径，同时保留文本的可编辑性。缓存未就绪时，点击复用该 Session 的目录请求，在完成后按点击时的 Session 地址打开预览。切换预设、重置连接和插件释放会取消待处理的预览；后续点击重新获取当前目录。没有文件路径的 skill 仍可调用，但没有文件预览。
 
+### 技能页
+
+侧边栏的全局面板列表在插件与自动化任务之后带一个 `技能`／`Skills` 行。它选中 `skills` 主面板，该面板列出主视图所持有 Session 的用户可调用 skill——由该 Session 的 agent preset 与项目 cwd 决定目录——并提供对名称、描述与路由说明的本地过滤。点击一行会在右侧栏打开其提供方的 `SKILL.md`；`modelInvocable: false` 的条目带上与 `/` 菜单前缀相同的仅限用户标记，而没有文件路径的 skill 只是普通行。打开该页不会产生 `/` 菜单尚未支付过的 RPC：它读取同一份按 Session 缓存的目录拉取，在切换预设或重置连接丢弃该缓存时重新拉取，并在主视图 Session 变化时跟随。没有打开任何 Session 时，该页只说明这一状态，不列出任何内容。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -57,7 +61,7 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 
 ### 注册
 
-`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。
+`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。该页把组件以 `skills` 键注册进 ui-layout 的 keyed `main` slot，并把图标以同一个 id 注册进 ui-sidebar 的 `sidebar.panellist` 列表，`order: 20`；两者背后的目录 source 跟随 Session 列表，并为每个读取状态发布一个快照，因此页面组件本身只负责渲染。
 
 </details>
 
@@ -70,6 +74,8 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 
 - [ui-input-trigger](../ui-input-trigger/README.zh.md)——该 source 注册进的行内建议机制。
 - [ui-tool](../ui-tool/README.zh.md)——承载 `tool.call.toolview` slot 的工具调用展示层。
+- [ui-sidebar](../ui-sidebar/README.zh.md)——拥有该页所出现于其中的全局面板行的列外壳。
+- [ui-layout](../ui-layout/README.zh.md)——该页所占据的 keyed `main` slot 所属框架。
 - [tool-skill](../../skill/tool-skill/README.zh.md)——拥有 pre-step 手势边界的宿主侧 `skill` 工具。
 - [Web 输入机器与 slash 流水线](../../../.agents/notes/archived/architecture/2026-07-25-web-input-machine-and-slash-pipeline.md)——引用与命令如何共享输入机器。
 
@@ -97,11 +103,12 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 <a id="known-limitations-and-deferred-work"></a>
 
 
-这些限制定义引用与工具行何时回退到通用行为；它们是当前包约束。
+这些限制定义引用、工具行与技能页何时回退到通用行为；它们是当前包约束。
 
 - **仅含工具结果的 history 页使用通用行**：键控分派要求配对的工具调用位于运行时窗口内；分页将工具调用留在窗口外时，工具结果没有工具身份。这项客户端呈现功能不会为了恢复该身份而扩展 history 协议约定。
 - **文本是唯一依据**：引用是普通的草稿文本；手动键入的相同 token 就是同一个引用，宿主手势边界评判的是发出的文本，而不是菜单交互。chip 视觉由 lexicon 扫描派生；提示词协议上没有 occurrence 身份、位置跟踪或结构化引用载荷。
 - **预热落定之前打开的菜单**：在那次击键下不显示 skill 候选；下一次击键会重新轮询已落定的缓存。
+- **技能页只列出一个 Session 的组成**：`skills/list` 按 Session 寻址，因此该页跟随主视图持有的 Session，在没有时说明该状态而不列出内容；跨会话或全 profile 的目录需要一份尚不存在的宿主读取。
 
 <a id="dev-note"></a>
 ### 开发备注

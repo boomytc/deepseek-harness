@@ -1,5 +1,5 @@
 ---
-description: "Web skill references and the dedicated skill tool row for the dsh web client: the /-triggered skill source and the skill call card."
+description: "Web skill references, the dedicated skill tool row, and the Skills page for the dsh web client: the /-triggered skill source, the skill call card, and the sidebar catalog."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-skill` lets users invoke a skill by choosing it from the `/` suggestions or typing `/name` directly. The same literal command loads the skill consistently from the Web composer, TUI, and ACP, while a name shared with a host command continues to resolve as that command. Skill calls appear in the conversation as expandable `Instructions` cards whose settled contents remain stable when the installed skill catalog changes.
+`dsh-client-ui-skill` lets users invoke a skill by choosing it from the `/` suggestions or typing `/name` directly. The same literal command loads the skill consistently from the Web composer, TUI, and ACP, while a name shared with a host command continues to resolve as that command. Skill calls appear in the conversation as expandable `Instructions` cards whose settled contents remain stable when the installed skill catalog changes. The same plugin also fills the sidebar's `技能`/`Skills` entry and the page behind it, which lists the skills the open Session can use.
 
 ## Table of Contents
 
@@ -39,6 +39,10 @@ A collapsed row renders the skill glyph, `Skill` title, and requested skill name
 
 Hovering over `/name` highlights the entire reference. Clicking a known skill opens its provider-supplied `SKILL.md` path in the right Sidebar while keeping the token editable. An uncached click shares the per-Session catalog fetch and opens when it completes, retaining the clicked Session address. Preset changes, connection resets, and plugin disposal cancel pending previews; a later click fetches the current catalog again. Skills without a file path remain invocable but have no file preview.
 
+### The Skills page
+
+The sidebar's global panel list carries one `技能`/`Skills` row after the Plugins and Automation tasks entries. It selects the `skills` main panel, which lists the user-invocable skills of the Session the main view retains — that Session's agent preset and project cwd select the catalog — with a local filter over names, descriptions, and routing notes. A row opens its provider's `SKILL.md` in the right Sidebar; `modelInvocable: false` entries wear the same user-only marker the `/` menu prefixes, and a skill without a file path stays a plain row. Opening the page costs no RPC the `/` menu has not already paid: it reads the same per-Session catalog fetch, re-reads when a preset switch or connection reset drops it, and follows the main-view Session when it changes. With no Session open the page states that instead of listing anything.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -57,7 +61,7 @@ Each catalog fetch requires an existing retained Client Session and waits for it
 
 ### Registration
 
-The `/client` exports are the plugin body (`apply`/`inject`) only; the source object is internal to the registration effect. The tool row registers the `skill` wire name in ui-tool's keyed `tool.call.toolview` slot.
+The `/client` exports are the plugin body (`apply`/`inject`) only; the source object is internal to the registration effect. The tool row registers the `skill` wire name in ui-tool's keyed `tool.call.toolview` slot. The page registers its component in ui-layout's keyed `main` slot under the `skills` key and its glyph in ui-sidebar's `sidebar.panellist` list under the same id, with `order: 20`; the catalog source behind them follows the Session list and publishes one snapshot per read state, so the page component itself only renders.
 
 </details>
 
@@ -70,6 +74,8 @@ These pages cover the input machinery, the tool row host, and the host-side skil
 
 - [ui-input-trigger](../ui-input-trigger/README.md) — the inline suggestion machinery the source registers into.
 - [ui-tool](../ui-tool/README.md) — the tool-call presentation layer hosting the `tool.call.toolview` slot.
+- [ui-sidebar](../ui-sidebar/README.md) — the column shell owning the global panel rows this page appears in.
+- [ui-layout](../ui-layout/README.md) — the frame whose keyed `main` slot the page occupies.
 - [tool-skill](../../skill/tool-skill/README.md) — the host-side `skill` tool owning the pre-step gesture boundary.
 - [Web input machine and slash pipeline](../../../.agents/notes/archived/architecture/2026-07-25-web-input-machine-and-slash-pipeline.md) — how references and commands share the input machine.
 
@@ -97,11 +103,12 @@ Append-only: the injected message lands after the reusable history prefix. This 
 <a id="known-limitations-and-deferred-work"></a>
 
 
-These limits define where the reference and the row fall back to generic behavior; they are current package constraints.
+These limits define where the reference, the row, and the page fall back to generic behavior; they are current package constraints.
 
 - **Result-only history pages use the generic row** — keyed dispatch needs the paired call in the runtime window; pagination that leaves the call outside has no tool identity. This client presentation feature does not extend the history wire contract to recover it.
 - **Text is the truth** — the reference is plain draft text; a hand-typed identical token is the same reference, and the host gesture boundary judges the sent text, not the menu interaction. Chip visuals derive from the lexicon scan; no occurrence identity, position tracking, or structured reference payload exists on the prompt wire.
 - **A menu opened before the prewarm settles** shows no skill candidates for that keystroke; the next keystroke re-polls the settled cache.
+- **The Skills page lists one Session's composition** — `skills/list` is Session-addressed, so the page follows the Session the main view retains and states the absence of one instead of listing anything; a profile-wide catalog would need a Host read that does not exist.
 
 <a id="dev-note"></a>
 ### Dev Note

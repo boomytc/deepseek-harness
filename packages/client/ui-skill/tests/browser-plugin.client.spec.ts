@@ -16,7 +16,10 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { InputTriggerService } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { RemoteError, TestRemote, TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionFixture } from '@deepseek-ai/dsh-client-test-runtime'
@@ -24,12 +27,19 @@ import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientSessionContext, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SkillRow as SkillToolRow } from '../src/client/SkillRow.tsx'
+import { SkillsPanel } from '../src/client/SkillsPanel.tsx'
+import { SkillsPanelIcon } from '../src/client/SkillsPanelIcon.tsx'
 
 type SkillRow = { name: string; description: string; whenToUse?: string; path?: string; modelInvocable?: boolean }
 type ListResult =
   | { ok: true; value: { skills: SkillRow[] } }
   | { ok: false; error: RemoteFailure }
 type ListFn = (payload: object, signal?: AbortSignal) => Promise<ListResult>
+
+/** Empty Session list: the Skills page source subscribes to it and finds no main-view Session. */
+const emptyList = () => createSnapshotStore<SessionListState>({
+  ids: [], byId: {}, phase: 'ready', projectionsBySession: {},
+})
 
 interface PresentationCapture {
   slots: SlotRegistry
@@ -42,7 +52,11 @@ function providePresentation(ctx: Context): PresentationCapture {
   const slots = new SlotRegistry(ctx)
   slots.register({
     name: 'root',
-    children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
+    children: {
+      'tool.call.toolview': { kind: 'keyed', scope: 'session' },
+      'main': { kind: 'keyed', scope: 'root' },
+      'sidebar.panellist': { kind: 'list', scope: 'root' },
+    },
   } as never, () => null)
   const capture: PresentationCapture = {
     slots,
@@ -121,7 +135,7 @@ describe('apply', () => {
     const ctx = new Context()
     ctx.provide('sidebarRight', { openResource: vi.fn() })
     ctx.provide('inputTriggers', { registerSource: () => () => {} })
-    ctx.provide('sessions', { subagentAddress: () => undefined })
+    ctx.provide('sessions', { subagentAddress: () => undefined, list: emptyList() })
     new TestRemote(ctx, { skills: { list: listOk(CATALOG) } })
     const presentation = providePresentation(ctx)
     await ctx.plugin({ inject: [...inject], apply }).await()
@@ -140,6 +154,18 @@ describe('apply', () => {
           'row.instructions': '说明',
           'row.inspect': '查看',
           'menu.userOnly': '仅用户',
+          'panel.title': '技能',
+          'panel.search.label': '搜索技能',
+          'panel.search.placeholder': '搜索技能',
+          'panel.search.clear': '清除搜索',
+          'panel.list.label': '可用技能',
+          'panel.loading': '正在加载技能',
+          'panel.error': '技能加载失败',
+          'panel.retry': '重试',
+          'panel.empty': '此会话当前没有可用技能',
+          'panel.noMatch': '没有匹配的技能',
+          'panel.noSession.title': '尚未打开会话',
+          'panel.noSession.hint': '打开一个会话后查看它的可用技能',
         },
         en: {
           'row.title': 'Skill',
@@ -150,16 +176,54 @@ describe('apply', () => {
           'row.instructions': 'Instructions',
           'row.inspect': 'Inspect',
           'menu.userOnly': 'user-only',
+          'panel.title': 'Skills',
+          'panel.search.label': 'Search skills',
+          'panel.search.placeholder': 'Search skills',
+          'panel.search.clear': 'Clear search',
+          'panel.list.label': 'Available skills',
+          'panel.loading': 'Loading skills',
+          'panel.error': 'Skills could not be loaded',
+          'panel.retry': 'Retry',
+          'panel.empty': 'This session has no available skills',
+          'panel.noMatch': 'No skill matches this search',
+          'panel.noSession.title': 'No session open',
+          'panel.noSession.hint': 'Open a session to see the skills it can use',
         },
       },
     }])
+  })
+
+  it('fills the Skills panel entry and its page, and drops both with the fiber (HMR safety)', async () => {
+    const ctx = new Context()
+    const openResource = vi.fn()
+    ctx.provide('sidebarRight', { openResource })
+    ctx.provide('inputTriggers', { registerSource: () => () => {} })
+    ctx.provide('sessions', { subagentAddress: () => undefined, list: emptyList() })
+    new TestRemote(ctx, { skills: { list: listOk(CATALOG) } })
+    const presentation = providePresentation(ctx)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    // The page and the sidebar row address each other by one id, so selecting
+    // the row resolves to a registered main panel.
+    const page = presentation.slots.entries('main')[0]
+    expect(page?.component).toBe(SkillsPanel)
+    expect(page?.options).toMatchObject({ key: 'skills' })
+    expect(page?.locale).toBe('skill')
+    const row = presentation.slots.entries('sidebar.panellist')[0]
+    expect(row?.component).toBe(SkillsPanelIcon)
+    expect(row?.options).toMatchObject({ id: 'skills', order: 20 })
+    expect(row?.locale).toBe('skill')
+    expect(resolveSlotLabel(row!.options.label)).toBe('panel.title')
+    await fiber.dispose()
+    expect(presentation.slots.entries('main')).toHaveLength(0)
+    expect(presentation.slots.entries('sidebar.panellist')).toHaveLength(0)
   })
 
   it('registers the "/" skill source; disposal frees the name (HMR safety)', async () => {
     const ctx = new Context()
     ctx.provide('sidebarRight', { openResource: vi.fn() })
     // InputTriggerService itself injects 'sessions'; the stub unblocks its fiber.
-    ctx.provide('sessions', {})
+    ctx.provide('sessions', { list: emptyList() })
     await ctx.plugin(InputTriggerService).await()
     new TestRemote(ctx, { skills: { list: listOk(CATALOG) } })
     const presentation = providePresentation(ctx)

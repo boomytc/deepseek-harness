@@ -1,0 +1,222 @@
+/* The Skills page takes the sibling page frame ui-schedule's task list and
+   ui-plugin-manager's plugin list already share: one scrolling pane, one
+   centered 960px column, and the 20px/28px/500 first-level title. */
+.page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.pageScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  /* A 9px rail carries the 5px thumb inset 2px from the pane edge (rendered by
+     ui-theme styles/scrollbar.css). */
+  --dsh-scrollbar-width: 9px;
+  --dsh-scrollbar-thumb-border: 2px;
+}
+
+.pageContent {
+  max-width: 960px;
+  margin: 0 auto;
+  /* Inline and bottom insets only: the heading row owns the top inset and
+     starts at the window's top edge. */
+  padding: 0 clamp(24px, 4vw, 48px) 48px;
+}
+
+.pageHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 28px;
+  margin-bottom: 24px;
+}
+
+/* macOS hiddenInset titlebar: the frame's own top clearance sits above this
+   page's inset, so the heading keeps the sibling pages' total offset. */
+:global([data-platform='darwin']) .pageHeading {
+  padding-top: calc(28px + var(--dsh-frame-top-clearance, 0px));
+}
+
+.pageHeading h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+}
+
+/* The task list's search field: one bordered 36px box whose wrapper owns the
+   hairline, so the atom inside keeps only its icon and input. */
+.searchField {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  margin: 0 0 16px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: border-color 0.15s;
+}
+
+.searchField:hover {
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.searchField:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.searchField > :first-child {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.searchField > :first-child:focus-within {
+  border-color: transparent;
+}
+
+.searchField > :first-child svg {
+  width: 14px;
+  height: 14px;
+}
+
+.searchField input::placeholder {
+  color: var(--dsw-alias-label-caption);
+}
+
+.searchField input:focus-visible {
+  outline: none;
+}
+
+/* The custom right-side button owns clearing the search field. */
+.searchField input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.searchClear {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+  padding: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchClear svg {
+  width: 14px;
+  height: 14px;
+}
+
+.listRows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One shared row box: the openable Button and the plain row for a skill with
+   no file to open differ only in that hover surface. */
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: auto;
+  padding: 8px;
+  border-radius: 12px;
+  text-align: left;
+  white-space: normal;
+}
+
+.openableRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowGlyph {
+  flex: none;
+  width: 16px;
+  height: 20px;
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 23px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowDescription {
+  display: block;
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+/* The centered state every state without rows shares, on the task list's
+   tertiary 14px/400 text with a caption-ink glyph. */
+.empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.emptyTitle {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.emptyHint {
+  color: var(--dsw-alias-label-caption);
+}
+
+.emptyGlyph {
+  margin-bottom: 12px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.emptyAction {
+  margin-top: 16px;
+}
