@@ -35,7 +35,7 @@ Open Settings and select **Archived** between **General** and **Models**; the pa
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The Host half is an empty `apply`, present only so the package holds a Loader row the client module system serves the browser half for. The browser half registers one row in `settings.section` (`id: archived`, `order: 5` — after General and before Models) and one row source behind it.
+The Host half is an empty `apply`, present only so the package holds a Loader row the client module system serves the browser half for. The browser half registers one row in `settings.section` (`id: archived-sessions`, `order: 5` — after General and before Models) and one row source behind it.
 
 `createArchivedSessionsSource` follows two independent snapshots: the Workspace controller's archive set and grouping, and the Session list that carries each session's title and update time. It re-projects on either change, skips archive-set members the list has not delivered, sorts newest update first, and republishes nothing when the projected rows are equal — so an unrelated Session status or a rename elsewhere re-renders no row. The page component owns no read: it receives that observable through its inject face, renders the list and its two states, and raises `openSession` (the `uiWorkspace` service) and `restoreSession` (`uiWorkspace.unarchiveSession`) back through the same face.
 

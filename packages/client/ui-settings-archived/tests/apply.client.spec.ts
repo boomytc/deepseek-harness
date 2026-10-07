@@ -85,7 +85,7 @@ describe('ui-settings-archived apply', () => {
     const slots = b.ctx.get('slots') as SlotRegistry
     const entry = slots.entries('settings.section')[0]!
     expect(entry.component).toBe(ArchivedSessionsSection)
-    expect(entry.options).toMatchObject({ id: 'archived', order: 5 })
+    expect(entry.options).toMatchObject({ id: 'archived-sessions', order: 5 })
     expect(entry.locale).toBe('settings.archived')
     expect(resolveSlotLabel(entry.options.label)).toBe('已归档')
 

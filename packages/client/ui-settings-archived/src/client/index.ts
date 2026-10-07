@@ -56,7 +56,7 @@ export function apply(ctx: ClientContext): void {
   })
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
-    id: 'archived',
+    id: 'archived-sessions',
     // After General (0) and before Models (10): the Sessions a person archived
     // are their own history, not a deployment-wide preference.
     order: 5,
