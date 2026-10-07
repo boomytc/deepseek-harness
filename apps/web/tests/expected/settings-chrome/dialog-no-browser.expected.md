@@ -2,6 +2,7 @@
   - navigation:
     - text: Settings
     - button "General"
+    - button "Archived"
     - button "Models"
     - button "Built-in plugins"
     - button "Agent presets"

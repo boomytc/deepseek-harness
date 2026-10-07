@@ -1,0 +1,83 @@
+/* The section frame every settings page uses: one 720px column, an 18px
+   title, and a tertiary intro line above the page's own content. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.intro {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}
+
+.empty {
+  margin: 24px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One bordered row: the text column takes the slack, the two actions keep
+   their own width. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 12px;
+}
+
+.rowText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.rowError {
+  margin-top: 2px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.rowActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}

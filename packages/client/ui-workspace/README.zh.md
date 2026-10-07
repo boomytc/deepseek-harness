@@ -47,13 +47,13 @@ kind: "package-reference"
 
 ### 搜索
 
-折叠搜索是视图和添加操作旁的一枚区头按钮：激活后输入框会扩展并占据区头。非空白查询会以单一扁平结果列表替代任一浏览模式——不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，不另给警告。列表最多显示 20 条结果。选择未归档结果会清空并收起搜索、打开 Session，并在当前浏览模式中将其行滚动到可见区域；分组浏览还会按需展开所属 Workspace 和完整 Session 列表。已归档结果提供取消归档操作；尝试打开时会说明限制，不清空查询，也不导航。
+折叠搜索是视图和添加操作旁的一枚区头按钮：激活后输入框会扩展并占据区头。非空白查询会以单一扁平结果列表替代任一浏览模式——不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，不另给警告。列表最多显示 20 条结果。选择结果会清空并收起搜索、打开 Session，并在当前浏览模式中将其行滚动到可见区域；分组浏览还会按需展开所属 Workspace 和完整 Session 列表。已归档结果以同样方式打开，保留其归档标记，并提供取消归档。
 
 ### 管理会话
 
 Session 行内的 Rename 操作打开一个以该行显示标题预填的对话框；确认未修改的标题是有意允许的——这正是把当前自动标题钉住、不再被重新生成覆盖的手势。双击标题也会打开 Rename；对于未归档 Session，先发生的点击会打开其对话。Rename 使用临时 `workspaceOperation` reference，并等待首次历史打开。行内 Fork 在源会话最后一个已完成轮次处 fork，通过 Session Controller 递增继承的持久化标题，不 retain 子会话、不打开其历史，也不改变选择。Workspace 行内的 Delete 操作会打开确认框，说明保留边界；成功后该分组被移除，其 Session 则留在 Ungrouped 下。Pin、Rename、Fork、Archive 本身就是 `sidebar.workspaces.session.menu.item` 列表的条目（pin 与 archive 同时也是 `sidebar.workspaces.session.row.action` 的条目），因此客户端插件的 action 由其 `order` 决定落在哪个位置。
 
-对静止的 Session，Archive 不经确认对话框直接提交，并保留 Session 的记账位置。仍有工作在跑的 Session 是唯一会先询问的情形：Host 拒绝普通归档并列出这些工作，侧栏随即打开"停止并归档"对话框，按族列出——进行中的回合、运行中的子代理、后台任务、定时提醒，各带名称——并写明恢复路径；确认后请 Host 按停止按钮同样的方式停止这些工作，归档集合持久化后即完成归档，停止在后台收敛；取消则让 Session 继续运行并保持可见。视图选项以一组显式三选一控制显隐：隐藏已归档（默认项）隐藏已归档 Session，全部对话（显示已归档）将其纳入列表，仅显示已归档则隐藏普通 Session，并丢弃没有归档 Session 的 Workspace；树形分组下，被丢弃 Workspace 的子级挂到最近一个仍显示的祖先下。可见的归档行置灰，并提供无障碍说明，告知取消归档后才能打开；Rename、Fork 与取消归档仍然可用。归档成功后的提示提供"撤销"动作，并在归档行仍被隐藏时附带"筛选已归档会话"动作，后者直接把筛选切到全部对话（显示已归档）；停止并归档显示同样的提示但措辞不同，撤销只恢复 Session，不会让被停止的工作继续。取消归档移除归档标记，但不恢复置顶，也不改变保存的位置。列表为空时显示居中的"图标在上、文字在下"占位；仅显示已归档视图用自己的文案（暂无已归档会话），并附"查看其他会话"文字按钮，点击把筛选切回隐藏已归档。
+对静止的 Session，Archive 不经确认对话框直接提交，并保留 Session 的记账位置。仍有工作在跑的 Session 是唯一会先询问的情形：Host 拒绝普通归档并列出这些工作，侧栏随即打开"停止并归档"对话框，按族列出——进行中的回合、运行中的子代理、后台任务、定时提醒，各带名称——并写明恢复路径；确认后请 Host 按停止按钮同样的方式停止这些工作，归档集合持久化后即完成归档，停止在后台收敛；取消则让 Session 继续运行并保持可见。视图选项以一组显式三选一控制显隐：隐藏已归档（默认项）隐藏已归档 Session，全部对话（显示已归档）将其纳入列表，仅显示已归档则隐藏普通 Session，并丢弃没有归档 Session 的 Workspace；树形分组下，被丢弃 Workspace 的子级挂到最近一个仍显示的祖先下。可见的归档行置灰，并向辅助技术说明该状态；打开其中一行会显示它的对话，而归档中的 Session 不执行任何模型步骤——其 composer 以归档方提供的原因取代输入，dock 则提供一键恢复——Rename、Fork 与取消归档仍然可用。归档成功后的提示提供"撤销"动作，并在归档行仍被隐藏时附带"筛选已归档会话"动作，后者直接把筛选切到全部对话（显示已归档）；停止并归档显示同样的提示但措辞不同，撤销只恢复 Session，不会让被停止的工作继续。取消归档移除归档标记，但不恢复置顶，也不改变保存的位置。列表为空时显示居中的"图标在上、文字在下"占位；仅显示已归档视图用自己的文案（暂无已归档会话），并附"查看其他会话"文字按钮，点击把筛选切回隐藏已归档。
 
 会话更新时间使用 tertiary 文本色，包括已归档行。标题宽于所在行时，静止状态以省略号裁切。把指针停在行上，标题会滚动到远端——例如 fork 递增后的标题——并在揭示时不显示省略号；指针离开后标题回到开头。
 
@@ -69,7 +69,7 @@ Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**
 
 -----
 
-`ctx.uiWorkspace.openSession(target)` 会同步替换其拥有的 `mainView` reference，并让主区域返回 Conversation，而不等待 `reference.ready`，因此历史加载会显示在已经选中的 Session 视图内。目标可以是已知 Session id，也可以是持久的直接父子 subagent 地址；显式地址不要求预先加载 parent catalog。`openWorkspace(id, beforeOpen?)` 仅在请求未被后续导航替代时打开结果；新会话使用 `openWorkspace`。`forkSession(id)` 创建子会话，不导航，也不替代尚未完成的导航。可选的同步准备回调在目标被 retain 后执行，并且仅对仍有效的 Workspace 请求执行，因此过期请求不会搬移 composer 草稿。后续导航或 owner 释放会阻止晚到的 UI 提交，但不取消底层 Session 创建。启动恢复会 retain 主 reference，不改变已选面板，也不取消后续导航。归档主 Session 会释放其 reference 并清除主选择。选择失败时保留当前全局面板。Session 行读取 `usePanelInfo`，在全局面板活跃时不显示 Session 选中样式；仅把焦点移到搜索框或目录选择器不会离开该面板。
+`ctx.uiWorkspace.openSession(target)` 会同步替换其拥有的 `mainView` reference，并让主区域返回 Conversation，而不等待 `reference.ready`，因此历史加载会显示在已经选中的 Session 视图内。目标可以是已知 Session id，也可以是持久的直接父子 subagent 地址；显式地址不要求预先加载 parent catalog。`openWorkspace(id, beforeOpen?)` 仅在请求未被后续导航替代时打开结果；新会话使用 `openWorkspace`。`forkSession(id)` 创建子会话，不导航，也不替代尚未完成的导航。可选的同步准备回调在目标被 retain 后执行，并且仅对仍有效的 Workspace 请求执行，因此过期请求不会搬移 composer 草稿。后续导航或 owner 释放会阻止晚到的 UI 提交，但不取消底层 Session 创建。启动恢复会 retain 主 reference，不改变已选面板，也不取消后续导航。归档主 Session 会让它保持选中且可读：归档集合从不释放主 reference，改为由归档 composer 的 block 取代其输入。选择失败时保留当前全局面板。Session 行读取 `usePanelInfo`，在全局面板活跃时不显示 Session 选中样式；仅把焦点移到搜索框或目录选择器不会离开该面板。
 
 导航和启动恢复通过所选 Session 的 `follow` 获取投影，不会另行刷新该 Session 或其父会话的投影。
 
@@ -98,6 +98,8 @@ Workspace 和 Session 的启动基线均就绪后，空安装环境调用 `works
 ### Session 行 action
 
 Session 行的 "..." 菜单和行尾悬停按钮是 WorkspaceBrowser 注册项声明的两个 `list` slot：`sidebar.workspaces.session.menu.item` 与 `sidebar.workspaces.session.row.action`。每一个菜单行、每一个悬停按钮都是条目，本包自己的 action 也不例外：`apply` 以客户端插件注册自己 action 的同一方式注册 `pin`（菜单 100、按钮 200）、`rename`（200）、`fork`（300）、`archive`（菜单 400、按钮 100），因此插件 action 落在其 `order` 所指的位置，以另一个 `priority` 复用内置 id 则遮蔽该 action。
+
+归档中的 Session 不执行任何模型步骤，因此 `apply` 会为归档集合中的每个 Session 升起 composer block——经由 `ctx.conversation.blocks`，这个注册表让 composer 无法导入的插件能够把某个 Session 的输入置为不可用——并在集合不再包含该 Session 或插件释放时清除。block 携带本包的本地化原因，因此切换语言会重新升起。同一个子作用域注册 `conversation.composer.dock` 条目 `archived-restore`（order 50，排在对话统计胶囊之后），用于恢复所绑定的 Session，因为承载「取消归档」的行可能在归档筛选隐藏行时不在视线内。
 
 条目只接收行身份（`sessionId`、`displayTitle`），其余一切自己负责：用自己注入的 hook 读自己关心的 Host 状态（置顶与归档集合，以每次 Workspace 快照只派生一次的 Set 形式），自己决定是否显示（Host 规定归档与置顶互斥，所以 pin 在归档行上不渲染），整套行为放在注册项自己的 `inject` face 里（置顶成功后顺带把会话推到保存顺序最前，归档成功后发提示），浮层也自己带——重命名对话框、停止并归档对话框和行 action 的提示是本包注册在 `shell.overlay` 的条目，由 action 注入的请求驱动。菜单条目渲染一个 `role="menuitem"` 的按钮（本包自己的行用 ui-primitives 的 `MenuItemButton`，它带宿主样式，开启新分组的行加 `separatorBefore`，分隔线随行一起出现和消失），并通过 slot 级 `useMenuOpenState` hook（菜单自身的打开状态，从该行的渲染出现处绑定）关闭菜单；悬停按钮条目渲染一个图标按钮，按钮条会拦住点击、不让它打开该行。browser 不再向行传任何 action 回调，它剩下的动作只有搜索结果里的恢复按钮和标题双击，后者发出的是同一个重命名请求。
 

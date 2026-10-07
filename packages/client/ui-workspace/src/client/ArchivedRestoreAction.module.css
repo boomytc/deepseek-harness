@@ -1,0 +1,6 @@
+/* One composer-dock entry: the dock lays entries out in one centered flex
+   row, so this root only shrink-wraps its button. */
+.frame {
+  display: inline-flex;
+  min-width: 0;
+}

@@ -938,7 +938,7 @@ describe('workspace browser rows', () => {
     // the pin marker stays off an archived row.
     expect(screen.queryByRole('img', { name: '已归档' })).toBeNull()
     expect(screen.queryByRole('img', { name: '已置顶' })).toBeNull()
-    expect(row.getAttribute('aria-description')).toBe('已归档对话暂时无法查看，请取消归档后查看')
+    expect(row.getAttribute('aria-description')).toBe('已归档：可以查看，恢复后才能继续对话')
   })
 
   it('double-clicking the title asks for the rename dialog with the current title, but not on a blank row', () => {

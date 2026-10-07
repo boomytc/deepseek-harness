@@ -270,8 +270,9 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   async archiveSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
+    // The Session it archives stays open: an archived Session is readable, and
+    // its composer carries the block reason and the way back.
     await this.workspaces.archiveSession(sessionId, options)
-    if (this.mainReference?.sessionId === sessionId) this.clearMain()
   }
 
   async unarchiveSession(sessionId: SessionId): Promise<void> {
@@ -314,7 +315,6 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
-      if (this.clearArchivedCurrent()) return
       if (initial !== 'waiting') return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
@@ -382,15 +382,6 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       if (!signal.aborted) this.notify({ kind: 'defaultWorkspaceFailed' })
       return undefined
     }
-  }
-
-  /** @returns true when an archived current selection was cleared. */
-  private clearArchivedCurrent(): boolean {
-    const current = this.mainReference?.sessionId
-    if (current === undefined
-      || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false
-    this.clearMain()
-    return true
   }
 
   private clearMain(): void {

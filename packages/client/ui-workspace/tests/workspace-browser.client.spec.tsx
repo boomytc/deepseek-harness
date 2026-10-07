@@ -128,7 +128,6 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     open: vi.fn(),
     searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
-    notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     unarchiveSession: vi.fn(async () => {}),
@@ -1168,32 +1167,27 @@ describe('WorkspaceBrowser', () => {
       .toEqual(['c', 'a', 'b'])
   })
 
-  it.each(['show', 'only'] as const)('does not open an archived row in the %s filter; it raises the not-openable notice instead', (filter) => {
+  it.each(['show', 'only'] as const)('opens an archived row under the %s filter', (filter) => {
     const open = vi.fn()
-    const notifyArchivedNotOpenable = vi.fn()
     const b = mount({
       useSessions: hook(sessionState([summary('gone', 1)])),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['gone'])], [sid('gone')])),
       open,
-      notifyArchivedNotOpenable,
     })
     act(() => { b.store.actions.setArchivedFilter(filter) })
     fireEvent.click(screen.getByText('alpha'))
     fireEvent.click(screen.getByText('gone'))
-    expect(open).not.toHaveBeenCalled()
-    expect(notifyArchivedNotOpenable).toHaveBeenCalledOnce()
+    expect(open).toHaveBeenCalledWith(sid('gone'))
     expect(screen.getByText('gone').closest('[role="treeitem"]')?.getAttribute('aria-description'))
-      .toBe('已归档对话暂时无法查看，请取消归档后查看')
+      .toBe('已归档：可以查看，恢复后才能继续对话')
   })
 
-  it('does not open an archived search result or clear its query; it raises the not-openable notice instead', async () => {
+  it('opens an archived search result and clears its query', async () => {
     const open = vi.fn()
-    const notifyArchivedNotOpenable = vi.fn()
     const b = mount({
       useSessions: hook(sessionState([summary('gone', 1)])),
       useWorkspaces: hook(workspaceState([workspace('alpha', ['gone'])], [sid('gone')])),
       open,
-      notifyArchivedNotOpenable,
     })
     act(() => { b.store.actions.setArchivedFilter('show') })
     fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
@@ -1202,10 +1196,9 @@ describe('WorkspaceBrowser', () => {
     await act(async () => { await Promise.resolve() })
     const row = within(screen.getByRole('tree', { name: '搜索结果' })).getByRole('treeitem')
     fireEvent.click(row)
-    expect(open).not.toHaveBeenCalled()
-    expect(notifyArchivedNotOpenable).toHaveBeenCalledOnce()
-    expect(row.getAttribute('aria-description')).toBe('已归档对话暂时无法查看，请取消归档后查看')
-    expect((input as HTMLInputElement).value).toBe('gone')
+    expect(open).toHaveBeenCalledWith(sid('gone'))
+    expect(row.getAttribute('aria-description')).toBe('已归档：可以查看，恢复后才能继续对话')
+    expect((input as HTMLInputElement).value).toBe('')
   })
 
   it('offers unarchive on archived search results only', async () => {

@@ -1134,11 +1134,13 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
-  it('clears a selected blank archived by a catalog update without reconnecting', () => {
+  it('keeps a selected blank archived by a catalog update without reconnecting', () => {
     const b = bench()
     b.uiWorkspace.openSession(sid('blank'))
     b.workspaces.list.set(workspaceState([workspace('a', [sid('blank')])], [sid('blank')]))
-    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    // An archived Session stays readable in place: the archive set never
+    // evicts the main view.
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
@@ -1244,25 +1246,25 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retained[0]!.reference.sessionId).toBe(sid('saved'))
   })
 
-  it('clears a selected Session when an external archive snapshot arrives', () => {
+  it('keeps a selected Session when an external archive snapshot arrives', () => {
     const b = bench()
     b.uiWorkspace.openSession(sid('current'))
 
     b.workspaces.list.set(workspaceState([], [sid('current')]))
 
-    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
-    expect(b.selectPanel).toHaveBeenCalledTimes(2)
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
+    expect(b.selectPanel).toHaveBeenCalledOnce()
   })
 
-  it('clears a selected Session after archiving it without an intervening snapshot', async () => {
+  it('keeps a selected Session after archiving it without an intervening snapshot', async () => {
     const b = bench()
     b.workspaces.onArchive = async () => {}
     b.uiWorkspace.openSession(sid('current'))
 
     await b.uiWorkspace.archiveSession(sid('current'))
 
-    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
-    expect(b.selectPanel).toHaveBeenCalledTimes(2)
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
+    expect(b.selectPanel).toHaveBeenCalledOnce()
   })
 
   it('forwards archive commands and preserves failures', async () => {

@@ -254,8 +254,6 @@ export type WorkspaceBrowserInjected = {
   searchResultLimit: number
   /** Open the Session rename dialog (a row title double-click); the rename action entry raises the same request. */
   requestSessionRename: (sessionId: SessionId, currentTitle: string) => void
-  /** Tell the user an archived row cannot be opened (a click on it). */
-  notifyArchivedNotOpenable: () => void
   /** Rename a Host Workspace (rejects on name conflict; resolves on durability). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   /** Delete only a Host Workspace registration; directory and Session logs remain. */
@@ -292,7 +290,6 @@ export type RowToast =
   | { kind: 'stoppedAndArchived'; sessionId: SessionId }
   | { kind: 'pinFailed' }
   | { kind: 'unpinFailed' }
-  | { kind: 'archivedNotOpenable' }
   | { kind: 'defaultWorkspaceFailed' }
   /**
    * An explicit New Session request that failed. `message` is untranslated:

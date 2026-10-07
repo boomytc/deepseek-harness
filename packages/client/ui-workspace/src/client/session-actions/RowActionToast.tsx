@@ -74,7 +74,6 @@ function plainNoticeText(
     case 'pinFailed': return t('toast.pinFailed')
     case 'unpinFailed': return t('toast.unpinFailed')
     case 'defaultWorkspaceFailed': return t('defaultWorkspace.failed')
-    case 'archivedNotOpenable': return t('toast.archivedNotOpenable')
     /* v8 ignore next 2 -- closed-union backstop; only reached if a notice kind is forged */
     default:
       return assertNever(toast)

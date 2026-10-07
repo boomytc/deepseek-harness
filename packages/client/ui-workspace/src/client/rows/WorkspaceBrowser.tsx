@@ -845,7 +845,6 @@ export function WorkspaceBrowser({
   startSession,
   open,
   requestSessionRename,
-  notifyArchivedNotOpenable,
   renameWorkspace,
   deleteWorkspace,
   insertWorkspaceBefore,
@@ -897,15 +896,6 @@ export function WorkspaceBrowser({
   const archivedFilter = useStore(s => s.archivedFilter ?? 'default')
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
-  // Archived sessions are not openable: the row stays visible under the
-  // filter but a click explains instead of navigating.
-  const guardedOpen = (sessionId: SessionId): void => {
-    if (archivedSessionIds.includes(sessionId)) {
-      notifyArchivedNotOpenable()
-      return
-    }
-    open(sessionId)
-  }
   const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
   const mainSessionId = Object.values(list.byId)
@@ -1030,10 +1020,6 @@ export function WorkspaceBrowser({
   const composingRef = useRef(false)
 
   const openSearchResult = (sessionId: SessionId): void => {
-    if (archivedSessionIds.includes(sessionId)) {
-      notifyArchivedNotOpenable()
-      return
-    }
     setRevealSessionId(sessionId)
     setQuery('')
     setSearchExpanded(false)
@@ -1369,7 +1355,7 @@ export function WorkspaceBrowser({
                 workspaceReady={workspaceReady}
                 animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                 useSessionStatus={useSessionStatus}
-                open={guardedOpen}
+                open={open}
                 onSessionRenameRequest={requestSessionRename}
                 renderSlot={renderSlot}
                 setSessionOrder={saveSessionOrder}
@@ -1397,7 +1383,7 @@ export function WorkspaceBrowser({
                 rowState={rowState}
                 onLeaveArchivedOnly={leaveArchivedOnly}
                 startSession={startSession}
-                open={guardedOpen}
+                open={open}
                 insertWorkspaceBefore={insertWorkspaceBefore}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}

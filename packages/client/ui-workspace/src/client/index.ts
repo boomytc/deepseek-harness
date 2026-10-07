@@ -42,6 +42,7 @@ import {
   type WorkspaceBrowserInjected, type WorkspacePickerInjected,
 } from './contract/slots.ts'
 import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './shortcuts.ts'
+import { ArchivedRestoreAction, type ArchivedRestoreActionInjected } from './ArchivedRestoreAction.tsx'
 import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
@@ -236,7 +237,6 @@ export function apply(ctx: Context): void {
     searchSessions,
     searchResultLimit: sessions.searchResultLimit,
     requestSessionRename,
-    notifyArchivedNotOpenable: () => { notify({ kind: 'archivedNotOpenable' }) },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },
     deleteWorkspace: async (workspaceId) => { await workspaces.delete(workspaceId) },
     insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
@@ -316,6 +316,48 @@ export function apply(ctx: Context): void {
     },
     WorkspacePicker,
   ))
+  // An archived Session runs no model step, so its composer is inert for as
+  // long as the archive set holds it; the reason names the state and the dock
+  // carries the way back. Both belong to the Conversation service, which
+  // arrives independently of this plugin's own activation: the child scope
+  // waits for it instead of constraining activation order.
+  ctx.inject(['conversation', 'slots'], (scope: Context) => {
+    const published = new Set<SessionId>()
+    const syncArchived = (): void => {
+      const archived = new Set<SessionId>(workspaces.list.getSnapshot().archivedSessionIds)
+      const reason = scope.locale.bind(NS)('composer.archived')
+      for (const sessionId of archived) {
+        published.add(sessionId)
+        scope.conversation.blocks.set(sessionId, { reason })
+      }
+      for (const sessionId of published) {
+        if (archived.has(sessionId)) continue
+        scope.conversation.blocks.set(sessionId, undefined)
+        published.delete(sessionId)
+      }
+    }
+    // A raised reason is localized copy the raising plugin owns, so a language
+    // change re-raises it for every Session still under the block.
+    scope.effect(() => scope.workspaces.list.subscribe(syncArchived), 'ui-workspace: archived composer blocks')
+    scope.effect(() => scope.locale.subscribe(syncArchived), 'ui-workspace: archived composer reason')
+    scope.effect(() => () => {
+      for (const sessionId of published) scope.conversation.blocks.set(sessionId, undefined)
+      published.clear()
+    }, 'ui-workspace: archived composer block lifetime')
+    syncArchived()
+    scope.slots.inject('conversation.composer.dock', () => scope.slots.register({
+      name: 'conversation.composer.dock',
+      id: 'archived-restore',
+      // After the chat statistics pills (0 and 1): restoring is an action, not
+      // a reading of the turn.
+      order: 50,
+      locale: NS,
+      inject: (): ArchivedRestoreActionInjected => ({
+        restore: unarchiveSession,
+        hooks: { archived: archivedSet },
+      }),
+    }, ArchivedRestoreAction))
+  })
 }
 
 /**

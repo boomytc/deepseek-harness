@@ -18,6 +18,7 @@ import {
   type WorkspaceViewStoreHandle,
 } from '../src/client/contract/slots.ts'
 import { WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
+import { ArchivedRestoreAction } from '../src/client/ArchivedRestoreAction.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from '../src/client/session-actions/ArchiveSession.tsx'
 import { ForkSessionMenuItem } from '../src/client/session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-actions/PinSession.tsx'
@@ -54,6 +55,15 @@ async function bench() {
   const ctx = new Context()
   ctx.provide('shortcuts', { register: () => () => {}, catalog: createSnapshotStore([]) })
   ctx.provide('uiConversation', {})
+  // Composer-block writes the archived-Session sync performs, in order.
+  const blocks: Array<{ readonly sessionId: string; readonly reason: string | undefined }> = []
+  ctx.provide('conversation', {
+    blocks: {
+      set: (sessionId: string, block: { reason: string } | undefined) => { blocks.push({ sessionId, reason: block?.reason }) },
+      storeFor: () => createSnapshotStore<{ reason: string } | undefined>(undefined),
+      forget: () => {},
+    },
+  } as never)
   await ctx.plugin(SlotRegistry).await()
   const create = vi.fn(async (input: { name: string } | { path: string }) => ({
     workspaceId: 'ws-new' as never,
@@ -93,7 +103,13 @@ async function bench() {
   // keeps its identity between reads.
   let workspaceSnapshot = workspaceState([])
   let sessionSnapshot = sessionState([])
-  const subscribe = () => () => {}
+  // The real Controller list is a snapshot store, so a replaced snapshot
+  // notifies every subscriber; the bench mirrors that instead of a no-op.
+  const listeners = new Set<() => void>()
+  const subscribe = (listener: () => void): (() => void) => {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }
   const workspacesSubscribe = vi.fn(subscribe)
   const initializeDefault = vi.fn(async (): Promise<WorkspaceView | undefined> => undefined)
   ctx.provide('workspaces', {
@@ -134,13 +150,22 @@ async function bench() {
   return {
     ctx, slots: ctx.get('slots') as SlotRegistry, locale, create, rename,
     retain, using, selectPanel, search, renameSession, binding, fork, pickDirectory, pinSession, unpinSession,
-    workspacesSubscribe, initializeDefault,
-    setWorkspaces: (snapshot: WorkspaceSnapshot): void => { workspaceSnapshot = snapshot },
-    setSessions: (snapshot: SessionListState): void => { sessionSnapshot = snapshot },
+    workspacesSubscribe, initializeDefault, blocks,
+    /** Last composer block written for one Session, distinguishing "never" from "cleared". */
+    lastBlock: (sessionId: string): { readonly reason: string | undefined } | undefined =>
+      [...blocks].reverse().find(write => write.sessionId === sessionId),
+    setWorkspaces: (snapshot: WorkspaceSnapshot): void => {
+      workspaceSnapshot = snapshot
+      for (const listener of [...listeners]) listener()
+    },
+    setSessions: (snapshot: SessionListState): void => {
+      sessionSnapshot = snapshot
+      for (const listener of [...listeners]) listener()
+    },
   }
 }
 
-type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'shell.overlay'
+type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'shell.overlay' | 'conversation.composer.dock'
 
 const MENU_ITEM = 'sidebar.workspaces.session.menu.item'
 const ROW_ACTION = 'sidebar.workspaces.session.row.action'
@@ -149,7 +174,9 @@ type RowListName = typeof MENU_ITEM | typeof ROW_ACTION | 'shell.overlay'
 /** Declare any subset of the holes with a single root registration ('root' is a single slot); the overlay is a list. */
 function declare(slots: SlotRegistry, ...names: HoleName[]): () => void {
   const children = Object.fromEntries(names.map(name => [
-    name, { kind: name === 'shell.overlay' ? 'list' : 'single', scope: 'root' },
+    name, name === 'conversation.composer.dock'
+      ? { kind: 'list', scope: 'session' }
+      : { kind: name === 'shell.overlay' ? 'list' : 'single', scope: 'root' },
   ]))
   return slots.register({ name: 'root', children } as never, () => null)
 }
@@ -441,15 +468,19 @@ describe('ui-workspace apply', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const unarchiveSession = vi.spyOn(b.ctx.uiWorkspace, 'unarchiveSession').mockResolvedValue(undefined)
     const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
-    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
     const view = viewInstance(b.slots)
 
-    // The browser raises the not-openable notice into the same entry, and the source notifies.
     expect(toast.hooks.toast.getSnapshot()).toBeNull()
     const noticed = vi.fn()
     const unsubscribe = toast.hooks.toast.subscribe(noticed)
-    browser.notifyArchivedNotOpenable()
-    expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'archivedNotOpenable', seq: 1 })
+    // A refused pin is one of the notices this share owns; raising it through
+    // the row action keeps the test on the plugin's own path.
+    b.pinSession.mockRejectedValueOnce(new Error('pin rejected'))
+    const pin = faceOf(entry(b.slots, MENU_ITEM, 'pin')) as PinSessionInjected
+    pin.pinSession(sid('one'))
+    await vi.waitFor(() => {
+      expect(toast.hooks.toast.getSnapshot()).toMatchObject({ kind: 'pinFailed' })
+    })
     expect(noticed).toHaveBeenCalledOnce()
     toast.dismissToast()
     expect(toast.hooks.toast.getSnapshot()).toBeNull()
@@ -471,6 +502,53 @@ describe('ui-workspace apply', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  it('blocks an archived Session and clears the block when the set drops it', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(b.blocks).toEqual([])
+
+    b.setWorkspaces(workspaceState([], [sid('gone')]))
+    expect(b.lastBlock('gone')).toEqual({ sessionId: 'gone', reason: '此会话已归档，恢复后才能继续对话' })
+
+    b.setWorkspaces(workspaceState([]))
+    expect(b.lastBlock('gone')).toEqual({ sessionId: 'gone', reason: undefined })
+  })
+
+  it('re-raises the archived reason in the language the user switched to', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    b.setWorkspaces(workspaceState([], [sid('gone')]))
+    expect(b.lastBlock('gone')?.reason).toBe('此会话已归档，恢复后才能继续对话')
+
+    // The reason is the raiser's localized copy, so a language change re-raises it.
+    b.locale.setLocale('en')
+    expect(b.lastBlock('gone')?.reason).toBe('This session is archived. Restore it to continue the conversation.')
+  })
+
+  it('clears every raised block when its fiber disposes', async () => {
+    const b = await bench()
+    const fiber = b.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    b.setWorkspaces(workspaceState([], [sid('gone'), sid('other')]))
+
+    await fiber.dispose()
+    expect(b.lastBlock('gone')).toEqual({ sessionId: 'gone', reason: undefined })
+    expect(b.lastBlock('other')).toEqual({ sessionId: 'other', reason: undefined })
+  })
+
+  it('carries the archived restore action in the composer dock', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    declare(b.slots, 'conversation.composer.dock')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+
+    const dock = b.slots.entries('conversation.composer.dock')
+    expect(dock.map(item => item.options.id)).toEqual(['archived-restore'])
+    expect(dock[0]!.component).toBe(ArchivedRestoreAction)
   })
 
   it('routes fork and rename through their shares, the rename dialog, and the browser face', async () => {

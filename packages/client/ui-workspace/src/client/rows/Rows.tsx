@@ -483,7 +483,7 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
       className={clsx(css.searchResultRow, selected && css.selected, result.archived && css.archived)}
       role="treeitem"
       aria-selected={selected}
-      aria-description={result.archived ? t('toast.archivedNotOpenable') : undefined}
+      aria-description={result.archived ? t('row.archivedHint') : undefined}
       onClick={() => { onOpen(result.id) }}
     >
       <span className={css.searchResultHeading}>
@@ -594,7 +594,7 @@ export function SessionNodeItem({
       )}
       role="treeitem"
       aria-selected={selected}
-      aria-description={row.archived ? t('toast.archivedNotOpenable') : undefined}
+      aria-description={row.archived ? t('row.archivedHint') : undefined}
       onClick={() => { onOpen(node.id) }}
       onPointerEnter={marquee.enter}
       onPointerLeave={marquee.leave}

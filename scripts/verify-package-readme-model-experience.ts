@@ -108,6 +108,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/store': { kind: 'none', reason: 'Browser-side state primitives; register nothing model-facing.' },
   'packages/client/ui-renderer': { kind: 'none', reason: 'Browser-side render assembly; registers nothing model-facing.' },
   'packages/client/ui-session': { kind: 'none', reason: 'Browser-side Session adapter; registers nothing model-facing.' },
+  'packages/client/ui-settings-archived': { kind: 'none', reason: 'Browser-side archive management; lists and restores Sessions without entering model context or changing Session records.' },
   'packages/client/connection': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/file-upload': { kind: 'none', reason: 'Browser-side request-body transport; registers nothing model-facing.' },
   'packages/api/remotes': { kind: 'none', reason: 'The Remote BFF selects business methods and forwarded events; selected services own any model-visible effect.' },

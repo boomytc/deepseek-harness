@@ -129,4 +129,96 @@ describe('web e2e: archived sessions are restored from the sidebar filter', () =
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 120_000)
+
+  it('keeps an archived conversation open and read-only, and restores it from the composer dock', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-archived-read-only'))
+    const seededRow = (await ungroupedSection()).locator('[role="treeitem"]')
+      .filter({ has: page.locator('button[aria-label^="Session actions for "]') })
+    await expect.poll(() => seededRow.count(), { timeout: 10_000 }).toBe(1)
+    await seededRow.click()
+    await expect.poll(() => seededRow.getAttribute('aria-selected'), { timeout: 10_000 }).toBe('true')
+
+    // Archiving the open Session leaves it open: its history stays readable and
+    // only its composer turns inert, naming the state.
+    const actionLabel = await seededRow.locator('button[aria-label^="Session actions for "]').getAttribute('aria-label')
+    await clickHoverAction(seededRow, actionLabel ?? '')
+    await page.getByRole('menuitem', { name: 'Archive session' }).click()
+    await expect.poll(
+      () => [...scaffold.ctx.workspaceRegistry.archivedSessionIds],
+      { timeout: 10_000 },
+    ).toEqual([SessionId(SEED_ID)])
+    await expect.poll(() => seededRow.count(), { timeout: 10_000 }).toBe(0)
+    const blocked = page.getByRole('textbox', { name: 'This session is archived. Restore it to continue the conversation.' })
+    await expect.poll(() => blocked.count(), { timeout: 15_000 }).toBe(1)
+
+    // The dock carries the way back; restoring clears the block in place.
+    await page.getByRole('button', { name: 'View options' }).click()
+    await page.getByRole('menuitem', { name: 'All conversations (show archived)', exact: true }).click()
+    await page.getByRole('button', { name: 'Restore session', exact: true }).click()
+    await expect.poll(
+      () => [...scaffold.ctx.workspaceRegistry.archivedSessionIds],
+      { timeout: 10_000 },
+    ).toEqual([])
+    await expect.poll(() => blocked.count(), { timeout: 15_000 }).toBe(0)
+    await expect.poll(
+      () => page.getByRole('textbox', { name: 'Message or run a task, / commands, @ files or sessions' }).count(),
+      { timeout: 15_000 },
+    ).toBe(1)
+    await expect.poll(
+      () => page.getByRole('button', { name: 'Restore session', exact: true }).count(),
+      { timeout: 10_000 },
+    ).toBe(0)
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  }, 120_000)
+
+  it('manages the archive set from the Settings page: list, open, and restore', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-archived-settings'))
+    const seededRow = (await ungroupedSection()).locator('[role="treeitem"]')
+      .filter({ has: page.locator('button[aria-label^="Session actions for "]') })
+    await expect.poll(() => seededRow.count(), { timeout: 10_000 }).toBe(1)
+    const actionLabel = await seededRow.locator('button[aria-label^="Session actions for "]').getAttribute('aria-label')
+    const title = (actionLabel ?? '').replace('Session actions for ', '')
+    await seededRow.click()
+    await expect.poll(() => seededRow.getAttribute('aria-selected'), { timeout: 10_000 }).toBe('true')
+    await clickHoverAction(seededRow, actionLabel ?? '')
+    await page.getByRole('menuitem', { name: 'Archive session' }).click()
+    await expect.poll(
+      () => [...scaffold.ctx.workspaceRegistry.archivedSessionIds],
+      { timeout: 10_000 },
+    ).toEqual([SessionId(SEED_ID)])
+
+    // The page lists the archived Session with the Workspace it left, and its
+    // Open returns to that conversation.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Settings' })
+    await dialog.getByRole('button', { name: 'Archived', exact: true }).click()
+    const archivedRow = dialog.getByRole('listitem').filter({ hasText: title })
+    await expect.poll(() => archivedRow.count(), { timeout: 10_000 }).toBe(1)
+    await archivedRow.getByRole('button', { name: 'Open', exact: true }).click()
+    await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
+    const blocked = page.getByRole('textbox', { name: 'This session is archived. Restore it to continue the conversation.' })
+    await expect.poll(() => blocked.count(), { timeout: 15_000 }).toBe(1)
+
+    // Restore from the page drops the row and returns the Session to the sidebar.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Archived', exact: true }).click()
+    await dialog.getByRole('listitem').filter({ hasText: title })
+      .getByRole('button', { name: 'Restore', exact: true }).click()
+    await expect.poll(
+      () => [...scaffold.ctx.workspaceRegistry.archivedSessionIds],
+      { timeout: 10_000 },
+    ).toEqual([])
+    await expect.poll(
+      () => dialog.getByRole('listitem').filter({ hasText: title }).count(),
+      { timeout: 10_000 },
+    ).toBe(0)
+    expect(await dialog.getByText('No archived sessions').count()).toBe(1)
+    await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
+    await ungroupedSection()
+    await expect.poll(() => seededRow.count(), { timeout: 15_000 }).toBe(1)
+    expect(tripwire.pageErrors).toEqual([])
+    expect(tripwire.warnings).toEqual([])
+  }, 120_000)
 })
