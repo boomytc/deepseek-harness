@@ -2,10 +2,11 @@
  * Observable rows behind the Archived sessions settings page.
  *
  * The page manages the registry-global archive set, while the facts a row
- * shows — title, Workspace, last update — live in the Session list, and the
- * two streams publish independently. This source re-projects on either change,
- * so the page renders one settled list per state and never reads a Session
- * body: an archived Session stays untouched until the user opens it.
+ * shows — title, Workspace, archive instant — live in the Session list and
+ * the archive timetable, and those streams publish independently. This source
+ * re-projects on either change, so the page renders one settled list per state
+ * and never reads a Session body: an archived Session stays untouched until
+ * the user opens it.
  */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -21,8 +22,13 @@ export interface ArchivedSessionRow {
   readonly title: string
   /** Title of the Workspace grouping the Session; absent under Ungrouped. */
   readonly workspace: string | undefined
-  /** Last update, used only for ordering and the row's own date. */
+  /** Last update, used only for ordering the page. */
   readonly updatedAt: number
+  /**
+   * When the Session entered the archive set, epoch milliseconds. Absent only
+   * while a client holds a record the Host has not stamped yet.
+   */
+  readonly archivedAt: number | undefined
 }
 
 /** Row source and teardown the page registration injects. */
@@ -36,7 +42,7 @@ export interface ArchivedSessionsSource {
 /**
  * Project the archive set through the Session list and the Workspace grouping.
  * @param sessions - Session list snapshot.
- * @param workspaces - Workspace snapshot carrying the archive set and grouping.
+ * @param workspaces - Workspace snapshot carrying the archive set, its instants, and grouping.
  * @returns archived rows, newest update first.
  */
 function project(sessions: SessionListState, workspaces: WorkspaceSnapshot): readonly ArchivedSessionRow[] {
@@ -46,11 +52,13 @@ function project(sessions: SessionListState, workspaces: WorkspaceSnapshot): rea
     // set is durable, while a summary arrives with the list baseline.
     const summary = sessions.byId[sessionId]
     if (summary === undefined) continue
+    const archivedAt = workspaces.archivedAt[sessionId]
     rows.push({
       sessionId,
       title: summary.displayTitle,
       workspace: workspaces.items.find(item => item.sessionIds.includes(sessionId))?.title,
       updatedAt: summary.updatedAt,
+      archivedAt: archivedAt === undefined ? undefined : Date.parse(archivedAt),
     })
   }
   return rows.sort((left, right) => right.updatedAt - left.updatedAt)
@@ -77,6 +85,7 @@ export function createArchivedSessionsSource(
       const candidate = next[index] as ArchivedSessionRow
       return row.sessionId === candidate.sessionId && row.title === candidate.title
         && row.workspace === candidate.workspace && row.updatedAt === candidate.updatedAt
+        && row.archivedAt === candidate.archivedAt
     })) return
     store.set(next)
   }

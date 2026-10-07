@@ -147,9 +147,10 @@ function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:0
 }
 
 /**
- * Media written before archivedSessionIds and pinnedSessionIds existed omit
- * the fields; keeping the fixtures in that shape continuously proves the
- * schema defaults upgrade them.
+ * Media written before archivedSessionIds, archivedAt, and pinnedSessionIds
+ * existed omit the fields; keeping the fixtures in that shape continuously
+ * proves the schema defaults upgrade them — an omitted archive instant is
+ * then stamped at startup instead of read as an unknown age.
  */
 type StoredDomainState = z.input<typeof workspaceDomainState>
 
@@ -203,7 +204,13 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     await fiber.await()
     expect(ctx.workspaceRegistry.list()).toEqual([])
     expect(list).toHaveBeenCalledTimes(1)
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: {},
+      pinnedSessionIds: [],
+    })
   })
 
   it('bootstraps once from list headers only, in workspace/session createdAt order', async () => {
@@ -237,6 +244,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
       initialized: true,
       workspaceIds: result.registry.list().map(workspace => workspace.id),
       archivedSessionIds: [],
+      archivedAt: {},
       pinnedSessionIds: [],
     })
   })
@@ -266,7 +274,13 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const second = await harness({ pool, sessions: [header('late', late, 100)] })
     expect(second.list).not.toHaveBeenCalled()
     expect(second.registry.list()).toEqual([])
-    expect(storedState(pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: {},
+      pinnedSessionIds: [],
+    })
   })
 
   it('reuses partial records after a bootstrap record write fails', async () => {
@@ -520,7 +534,13 @@ describe('WorkspaceRegistry create and lookup', () => {
     await expect(result.registry.delete(workspace.id)).resolves.toBe(false)
     expect(result.registry.get(workspace.id)).toBeUndefined()
     expect(result.registry.list()).toEqual([])
-    expect(storedState(result.pool)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(result.pool)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: {},
+      pinnedSessionIds: [],
+    })
     expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
     await expect(realpath(dir)).resolves.toBe(dir)
     expect(result.list).toHaveBeenCalledTimes(1)
@@ -564,6 +584,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [],
       archivedSessionIds: [],
+      archivedAt: {},
       pinnedSessionIds: [],
       pendingMutation: { operation: 'delete', workspaceId: workspace.id },
     })
@@ -573,6 +594,7 @@ describe('WorkspaceRegistry create and lookup', () => {
       initialized: true,
       workspaceIds: [reregistered.id],
       archivedSessionIds: [],
+      archivedAt: {},
       pinnedSessionIds: [],
     })
     await first.fiber.dispose()
@@ -853,7 +875,13 @@ describe('header-validated membership projection', () => {
     const createRecovery = await harness({ pool: interruptedCreate })
     expect(createRecovery.registry.list()).toEqual([])
     expect(interruptedCreate.media.get('workspace')!.tables.get('workspaces')!.has(createId)).toBe(false)
-    expect(storedState(interruptedCreate)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(interruptedCreate)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: {},
+      pinnedSessionIds: [],
+    })
 
     const interruptedDelete = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -866,7 +894,13 @@ describe('header-validated membership projection', () => {
     const deleteRecovery = await harness({ pool: interruptedDelete })
     expect(deleteRecovery.registry.list()).toEqual([])
     expect(interruptedDelete.media.get('workspace')!.tables.get('workspaces')!.has(deleteId)).toBe(false)
-    expect(storedState(interruptedDelete)).toEqual({ initialized: true, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] })
+    expect(storedState(interruptedDelete)).toEqual({
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: {},
+      pinnedSessionIds: [],
+    })
 
     const corruptPending = storedPool(
       [[deleteId, record(deleteDir, [])]],
@@ -929,6 +963,56 @@ describe('registry-global session archive', () => {
 
     await result.registry.archiveSession(SessionId('kept'))
     expect(result.registry.archivedSessionIds).toEqual(['gone', 'kept'])
+  })
+
+  it('records when each Session entered the archive and drops the instant on restore', async () => {
+    const dir = await makeDir('archive-instant')
+    const result = await harness({ sessions: [header('kept', dir, 100)] })
+
+    await result.registry.archiveSession(SessionId('kept'))
+    const stamped = result.registry.archivedAt['kept']
+    expect(stamped).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(storedState(result.pool).archivedAt).toEqual({ kept: stamped })
+
+    await result.registry.unarchiveSession(SessionId('kept'))
+    expect(result.registry.archivedAt).toEqual({})
+    expect(storedState(result.pool).archivedAt).toEqual({})
+  })
+
+  it('stamps a pre-field archive at startup and keeps an instant the record already carries', async () => {
+    const dir = await makeDir('archive-stamp')
+    const recorded = '2026-01-01T00:00:00.000Z'
+    const pool = storedPool([], {
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [SessionId('old'), SessionId('dated')],
+      archivedAt: { dated: recorded },
+    })
+
+    const result = await harness({ pool, sessions: [header('old', dir, 100)] })
+
+    expect(result.registry.archivedAt['dated']).toBe(recorded)
+    const stamped = result.registry.archivedAt['old']
+    expect(stamped).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    // The stamp is durable: a later startup reads an age instead of restamping.
+    expect(storedState(pool).archivedAt).toEqual({ old: stamped, dated: recorded })
+
+    const restarted = await harness({ pool, sessions: [header('old', dir, 100)] })
+    expect(restarted.registry.archivedAt).toEqual({ old: stamped, dated: recorded })
+  })
+
+  it('drops an archive instant whose Session left the set', async () => {
+    const pool = storedPool([], {
+      initialized: true,
+      workspaceIds: [],
+      archivedSessionIds: [],
+      archivedAt: { stray: '2026-01-01T00:00:00.000Z' },
+    })
+
+    const result = await harness({ pool })
+
+    expect(result.registry.archivedAt).toEqual({})
+    expect(storedState(pool).archivedAt).toEqual({})
   })
 
   it('accepts unaccounted and live sessions but rejects unknown ids without writing', async () => {

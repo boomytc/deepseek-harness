@@ -73,6 +73,7 @@ const workspaceState = (
 ): WorkspaceSnapshot => ({
   items,
   archivedSessionIds,
+  archivedAt: {},
   pinnedSessionIds,
   state: 'idle',
   phase: 'ready',

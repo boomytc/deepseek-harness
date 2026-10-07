@@ -129,9 +129,14 @@ export interface WorkspaceUnarchiveSessionRequest {
   readonly sessionId: SessionId
 }
 
+/** Archive instants by Session id, ISO-8601; the keys are exactly the archived Session ids. */
+export type WorkspaceArchiveTimes = Readonly<Record<string, string>>
+
 /** Complete archived Session set after a mutation. */
 export interface WorkspaceArchiveValue {
   readonly archivedSessionIds: readonly SessionId[]
+  /** One archive instant per id in `archivedSessionIds`. */
+  readonly archivedAt: WorkspaceArchiveTimes
 }
 
 /** Session requested for pinning ahead of unpinned Sessions on grouping surfaces. */
@@ -153,6 +158,8 @@ export interface WorkspacePinValue {
 export interface WorkspaceBaseline {
   readonly items: readonly WorkspaceView[]
   readonly archivedSessionIds: readonly SessionId[]
+  /** One archive instant per id in `archivedSessionIds`. */
+  readonly archivedAt: WorkspaceArchiveTimes
   /** Registry-global pin set, most recently pinned first. */
   readonly pinnedSessionIds: readonly SessionId[]
 }
@@ -162,7 +169,7 @@ export type WorkspaceFollowIncrement =
   | { readonly type: 'upsert'; readonly workspace: WorkspaceView }
   | { readonly type: 'remove'; readonly workspaceId: WorkspaceId }
   | { readonly type: 'order'; readonly workspaceIds: readonly WorkspaceId[] }
-  | { readonly type: 'archived'; readonly archivedSessionIds: readonly SessionId[] }
+  | { readonly type: 'archived'; readonly archivedSessionIds: readonly SessionId[]; readonly archivedAt: WorkspaceArchiveTimes }
   | { readonly type: 'pinned'; readonly pinnedSessionIds: readonly SessionId[] }
 
 /** Workspace state stream; every generation starts with exactly one baseline. */

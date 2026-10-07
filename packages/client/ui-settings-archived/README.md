@@ -25,7 +25,7 @@ The **Archived sessions** page in Settings lists every Session the profile archi
 <a id="use-this-package"></a>
 ## Use this package
 
-Open Settings and select **Archived** between **General** and **Models**; the page titles itself **Archived sessions**. Each row names the Session, its Workspace (or **Ungrouped**), and its last update in the active language. **Open** selects that Session in the main view and closes Settings; the conversation renders its full history, while its composer states that the Session is archived instead of accepting input. **Restore** removes the row from the list, and the Session appears in the sidebar again under its Workspace. One restore runs at a time: every row's button is disabled while one is in flight, and a refused restore keeps its row with the reason beside it. An empty set states that nothing is archived.
+Open Settings and select **Archived** between **General** and **Models**; the page titles itself **Archived sessions**. Each row names the Session, its Workspace (or **Ungrouped**), and the date it was archived, formatted in the active language; the list itself stays ordered by last update. **Open** selects that Session in the main view and closes Settings; the conversation renders its full history, while its composer states that the Session is archived instead of accepting input. **Restore** removes the row from the list, and the Session appears in the sidebar again under its Workspace. One restore runs at a time: every row's button is disabled while one is in flight, and a refused restore keeps its row with the reason beside it. An empty set states that nothing is archived.
 
 -----
 
@@ -37,7 +37,7 @@ Open Settings and select **Archived** between **General** and **Models**; the pa
 
 The Host half is an empty `apply`, present only so the package holds a Loader row the client module system serves the browser half for. The browser half registers one row in `settings.section` (`id: archived-sessions`, `order: 5` — after General and before Models) and one row source behind it.
 
-`createArchivedSessionsSource` follows two independent snapshots: the Workspace controller's archive set and grouping, and the Session list that carries each session's title and update time. It re-projects on either change, skips archive-set members the list has not delivered, sorts newest update first, and republishes nothing when the projected rows are equal — so an unrelated Session status or a rename elsewhere re-renders no row. The page component owns no read: it receives that observable through its inject face, renders the list and its two states, and raises `openSession` (the `uiWorkspace` service) and `restoreSession` (`uiWorkspace.unarchiveSession`) back through the same face.
+`createArchivedSessionsSource` follows two independent snapshots: the Workspace controller's archive set, its archive instants, and its grouping, plus the Session list that carries each session's title and update time. It re-projects on either change, skips archive-set members the list has not delivered, sorts newest update first, and republishes nothing when the projected rows are equal — so an unrelated Session status or a rename elsewhere re-renders no row. The page component owns no read: it receives that observable through its inject face, renders the list and its two states, and raises `openSession` (the `uiWorkspace` service) and `restoreSession` (`uiWorkspace.unarchiveSession`) back through the same face.
 
 </details>
 

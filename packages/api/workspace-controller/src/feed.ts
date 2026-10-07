@@ -10,6 +10,7 @@ import {
   WorkspaceId,
 } from '@deepseek-ai/dsh-workspace'
 import type {
+  WorkspaceArchiveTimes,
   WorkspaceBaseline,
   WorkspaceFollowFrame,
   WorkspaceView,
@@ -49,6 +50,7 @@ export class WorkspaceFeed {
   private knownIds: Set<string>
   private order: readonly string[]
   private archived: readonly string[]
+  private archivedAt: WorkspaceArchiveTimes = {}
   private pinned: readonly string[]
 
   /** @param ctx - Host context containing the authoritative Workspace registry. */
@@ -57,6 +59,7 @@ export class WorkspaceFeed {
     this.knownIds = new Set(baseline.map(workspace => String(workspace.id)))
     this.order = baseline.map(workspace => String(workspace.id))
     this.archived = ctx.workspaceRegistry.archivedSessionIds.map(String)
+    this.archivedAt = { ...ctx.workspaceRegistry.archivedAt }
     this.pinned = ctx.workspaceRegistry.pinnedSessionIds.map(String)
     ctx.on('domain/changed', (change: DomainChanged) => { this.changed(change) })
     ctx.effect(() => () => {
@@ -73,6 +76,7 @@ export class WorkspaceFeed {
     return {
       items: this.ctx.workspaceRegistry.list().map(workspaceView),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
+      archivedAt: { ...this.ctx.workspaceRegistry.archivedAt },
       pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds],
     }
   }
@@ -114,9 +118,14 @@ export class WorkspaceFeed {
       this.order = nextOrder
       if (orderChanged) this.publish({ type: 'order', workspaceIds: [...state.workspaceIds] })
       const nextArchived = state.archivedSessionIds.map(String)
-      if (!sameStrings(this.archived, nextArchived)) {
+      if (!sameStrings(this.archived, nextArchived) || !sameTimes(this.archivedAt, state.archivedAt)) {
         this.archived = nextArchived
-        this.publish({ type: 'archived', archivedSessionIds: [...state.archivedSessionIds] })
+        this.archivedAt = state.archivedAt
+        this.publish({
+          type: 'archived',
+          archivedSessionIds: [...state.archivedSessionIds],
+          archivedAt: state.archivedAt,
+        })
       }
       const nextPinned = state.pinnedSessionIds.map(String)
       if (!sameStrings(this.pinned, nextPinned)) {
@@ -145,6 +154,13 @@ export class WorkspaceFeed {
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+/** Whether two archive-instant maps hold the same keys with the same instants. */
+function sameTimes(left: WorkspaceArchiveTimes, right: WorkspaceArchiveTimes): boolean {
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length
+    && keys.every(key => left[key] === right[key])
 }
 
 class WorkspaceFollower {

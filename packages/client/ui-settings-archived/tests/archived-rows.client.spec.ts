@@ -32,9 +32,13 @@ const sessionState = (items: readonly SessionSummary[]): SessionListState => ({
 const workspaceState = (
   items: readonly WorkspaceView[],
   archivedSessionIds: readonly SessionId[],
+  archivedAt: Readonly<Record<string, string>> = {},
 ): WorkspaceSnapshot => ({
-  items, archivedSessionIds, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+  items, archivedSessionIds, archivedAt, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
 })
+
+/** One ISO archive instant per day in September 2026. */
+const instant = (day: number): string => new Date(Date.UTC(2026, 8, day)).toISOString()
 
 function bench() {
   const sessions = createSnapshotStore<SessionListState>(sessionState([]))
@@ -44,28 +48,39 @@ function bench() {
 }
 
 describe('archived session rows', () => {
-  it('lists the archive set newest update first, named by its Workspace', () => {
+  it('lists the archive set newest update first, named by its Workspace, dated by its archive instant', () => {
     const { sessions, workspaces, source } = bench()
     sessions.set(sessionState([summary('a', 10, 'First'), summary('b', 30, 'Second'), summary('c', 20, 'Third')]))
     workspaces.set(workspaceState(
       [workspace('alpha', ['a', 'b'], 'Alpha'), workspace('beta', ['c'], 'Beta')],
       [sid('a'), sid('b'), sid('c')],
+      { a: instant(1), b: instant(2), c: instant(3) },
     ))
 
     expect(source.hooks.rows.getSnapshot()).toEqual([
-      { sessionId: sid('b'), title: 'Second', workspace: 'Alpha', updatedAt: 30 },
-      { sessionId: sid('c'), title: 'Third', workspace: 'Beta', updatedAt: 20 },
-      { sessionId: sid('a'), title: 'First', workspace: 'Alpha', updatedAt: 10 },
+      { sessionId: sid('b'), title: 'Second', workspace: 'Alpha', updatedAt: 30, archivedAt: Date.UTC(2026, 8, 2) },
+      { sessionId: sid('c'), title: 'Third', workspace: 'Beta', updatedAt: 20, archivedAt: Date.UTC(2026, 8, 3) },
+      { sessionId: sid('a'), title: 'First', workspace: 'Alpha', updatedAt: 10, archivedAt: Date.UTC(2026, 8, 1) },
     ])
   })
 
   it('leaves a Session outside every Workspace without a Workspace title', () => {
     const { sessions, workspaces, source } = bench()
     sessions.set(sessionState([summary('orphan', 5)]))
-    workspaces.set(workspaceState([], [sid('orphan')]))
+    workspaces.set(workspaceState([], [sid('orphan')], { orphan: instant(4) }))
 
     expect(source.hooks.rows.getSnapshot()).toEqual([
-      { sessionId: sid('orphan'), title: 'orphan', workspace: undefined, updatedAt: 5 },
+      { sessionId: sid('orphan'), title: 'orphan', workspace: undefined, updatedAt: 5, archivedAt: Date.UTC(2026, 8, 4) },
+    ])
+  })
+
+  it('keeps a set member whose archive instant has not arrived, without a date', () => {
+    const { sessions, workspaces, source } = bench()
+    sessions.set(sessionState([summary('a', 10)]))
+    workspaces.set(workspaceState([], [sid('a')]))
+
+    expect(source.hooks.rows.getSnapshot()).toEqual([
+      { sessionId: sid('a'), title: 'a', workspace: undefined, updatedAt: 10, archivedAt: undefined },
     ])
   })
 
@@ -78,15 +93,31 @@ describe('archived session rows', () => {
   it('drops a row when the set loses the Session, and keeps identity across an unrelated update', () => {
     const { sessions, workspaces, source } = bench()
     sessions.set(sessionState([summary('a', 10), summary('b', 20)]))
-    workspaces.set(workspaceState([], [sid('a'), sid('b')]))
+    workspaces.set(workspaceState([], [sid('a'), sid('b')], { a: instant(1), b: instant(2) }))
     const settled = source.hooks.rows.getSnapshot()
 
     // A new Session arriving elsewhere changes neither row.
     sessions.set(sessionState([summary('a', 10), summary('b', 20), summary('c', 30)]))
     expect(source.hooks.rows.getSnapshot()).toBe(settled)
 
-    workspaces.set(workspaceState([], [sid('b')]))
-    expect(source.hooks.rows.getSnapshot()).toEqual([{ sessionId: sid('b'), title: 'b', workspace: undefined, updatedAt: 20 }])
+    workspaces.set(workspaceState([], [sid('b')], { b: instant(2) }))
+    expect(source.hooks.rows.getSnapshot()).toEqual([
+      { sessionId: sid('b'), title: 'b', workspace: undefined, updatedAt: 20, archivedAt: Date.UTC(2026, 8, 2) },
+    ])
+  })
+
+  it('republishes when only the archive instant of a held Session changes', () => {
+    const { sessions, workspaces, source } = bench()
+    sessions.set(sessionState([summary('a', 10)]))
+    workspaces.set(workspaceState([], [sid('a')], { a: instant(1) }))
+    const stamped = source.hooks.rows.getSnapshot()
+
+    workspaces.set(workspaceState([], [sid('a')], { a: instant(5) }))
+
+    expect(source.hooks.rows.getSnapshot()).not.toBe(stamped)
+    expect(source.hooks.rows.getSnapshot()).toEqual([
+      { sessionId: sid('a'), title: 'a', workspace: undefined, updatedAt: 10, archivedAt: Date.UTC(2026, 8, 5) },
+    ])
   })
 
   it('notifies subscribers per change and stops following once disposed', () => {

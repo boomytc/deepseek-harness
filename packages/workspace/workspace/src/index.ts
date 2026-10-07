@@ -202,6 +202,7 @@ export class WorkspaceRegistry extends Service {
     this.state = domain.global.get()
 
     await this.recoverPendingMutation()
+    await this.normalizeArchiveTimes()
     this.validateStoredState(this.state)
     if (!this.state.initialized) {
       const headers = await this.listStoredHeaders()
@@ -344,6 +345,17 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * When each archived session entered the archive set, keyed by Session id.
+   * A session archived before the field existed carries the instant the
+   * registry first read that record, so an upgrade never makes an old archive
+   * look stale.
+   * @returns ISO-8601 archive instants for the ids in {@link archivedSessionIds}.
+   */
+  get archivedAt(): Readonly<Record<string, string>> {
+    return this.requireState().archivedAt
+  }
+
+  /**
    * Archive one session durably. The session must exist (live or in session
    * persistence); its workspace accounting — or lack of one — is irrelevant.
    * Without `stopActivity` the session must also be inactive: the
@@ -378,6 +390,7 @@ export class WorkspaceRegistry extends Service {
       await this.setState({
         ...state,
         archivedSessionIds: [...state.archivedSessionIds, sessionId],
+        archivedAt: { ...state.archivedAt, [sessionId]: new Date().toISOString() },
         pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
       })
       if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
@@ -403,6 +416,7 @@ export class WorkspaceRegistry extends Service {
       await this.setState({
         ...state,
         archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+        archivedAt: withoutKey(state.archivedAt, sessionId),
       })
     })
   }
@@ -728,6 +742,7 @@ export class WorkspaceRegistry extends Service {
         initialized: false,
         workspaceIds,
         archivedSessionIds: state.archivedSessionIds,
+        archivedAt: state.archivedAt,
         pinnedSessionIds: state.pinnedSessionIds,
       })
     }
@@ -735,8 +750,30 @@ export class WorkspaceRegistry extends Service {
       initialized: true,
       workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
+      archivedAt: state.archivedAt,
       pinnedSessionIds: state.pinnedSessionIds,
     })
+  }
+
+  /**
+   * Make the archive-instant map agree with the archive set: drop entries for
+   * ids the set no longer holds, and stamp an instant for an archived id that
+   * has none — an archive written before the field existed, which never
+   * becomes deletable by having an unknown age. Runs once per startup, before
+   * the service accepts other calls.
+   */
+  private async normalizeArchiveTimes(): Promise<void> {
+    const state = this.requireState()
+    const stampedAt = new Date().toISOString()
+    let changed = Object.keys(state.archivedAt).length !== state.archivedSessionIds.length
+    const archivedAt: Record<string, string> = {}
+    for (const id of state.archivedSessionIds) {
+      const known = state.archivedAt[id]
+      if (known === undefined) changed = true
+      archivedAt[id] = known ?? stampedAt
+    }
+    if (!changed) return
+    await this.setState({ ...state, archivedAt })
   }
 
   private validateStoredState(state: WorkspaceDomainState): void {
@@ -897,5 +934,9 @@ export class WorkspaceRegistry extends Service {
 
 const sameSessionIds = (left: readonly SessionId[], right: readonly SessionId[]): boolean =>
   left.length === right.length && left.every((id, index) => id === right[index])
+
+/** Copy an archive-instant map without one key. */
+const withoutKey = (map: Readonly<Record<string, string>>, key: string): Record<string, string> =>
+  Object.fromEntries(Object.entries(map).filter(([held]) => held !== key))
 
 export default WorkspaceRegistry

@@ -30,13 +30,13 @@ export type ArchivedSessionsSectionProps = PropsRuntime<'settings.section'>
   & PropsLocale<typeof NS>
 
 /**
- * Format one update instant for the active language.
- * @param updatedAt - epoch milliseconds of the Session's last update.
+ * Format one instant for the active language.
+ * @param instant - epoch milliseconds to render.
  * @param locale - BCP 47 tag the active dictionary declares.
  * @returns the medium date the row shows.
  */
-function formatUpdated(updatedAt: number, locale: string): string {
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(updatedAt)
+function formatInstant(instant: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(instant)
 }
 
 /**
@@ -69,7 +69,10 @@ export function ArchivedSessionsSection({
             <div className={css.rowText}>
               <span className={css.rowTitle}>{row.title}</span>
               <span className={css.rowMeta}>
-                {row.workspace ?? t('ungrouped')}{' · '}{formatUpdated(row.updatedAt, t('date.locale'))}
+                {row.workspace ?? t('ungrouped')}
+                {row.archivedAt === undefined
+                  ? null
+                  : <>{' · '}{t('archivedOn')}{' '}{formatInstant(row.archivedAt, t('date.locale'))}</>}
               </span>
               {failed === row.sessionId && <span className={css.rowError} role="alert">{t('restoreFailed')}</span>}
             </div>

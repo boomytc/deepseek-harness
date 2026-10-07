@@ -32,7 +32,7 @@ const sessionState = (items: readonly SessionSummary[]): SessionListState => ({
 })
 
 const workspaceSnapshot = (archivedSessionIds: readonly SessionId[]): WorkspaceSnapshot => ({
-  items: [], archivedSessionIds, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+  items: [], archivedSessionIds, archivedAt: {}, pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
 })
 
 async function bench() {

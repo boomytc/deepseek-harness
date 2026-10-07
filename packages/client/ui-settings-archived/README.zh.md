@@ -37,7 +37,7 @@ kind: "package-reference"
 
 宿主半侧是一个空的 `apply`，只为让本包占一条 Loader 行，客户端模块系统据此送出浏览器半侧。浏览器半侧在 `settings.section` 注册一行（`id: archived-sessions`，`order: 5`——排在「通用」之后、「模型」之前），并在其背后注册一个行 source。
 
-`createArchivedSessionsSource` 同时跟随两个彼此独立的快照：Workspace 控制器的归档集合与分组，以及携带各会话标题和更新时间的 Session 列表。任一变化都会重新投影：归档集合中列表尚未送达的成员会被跳过，结果按更新时间从新到旧排序，投影结果相等时不发布任何内容——因此无关的 Session 状态变化或别处的一次重命名不会重渲染任何行。页面组件自己不做读取：它通过自己的 inject face 接收该 observable，渲染列表与两种状态，并通过同一个 face 回传 `openSession`（`uiWorkspace` 服务）与 `restoreSession`（`uiWorkspace.unarchiveSession`）。
+`createArchivedSessionsSource` 同时跟随两个彼此独立的快照：Workspace 控制器的归档集合、归档时间与分组，以及携带各会话标题和更新时间的 Session 列表。任一变化都会重新投影：归档集合中列表尚未送达的成员会被跳过，结果按更新时间从新到旧排序，投影结果相等时不发布任何内容——因此无关的 Session 状态变化或别处的一次重命名不会重渲染任何行。页面组件自己不做读取：它通过自己的 inject face 接收该 observable，渲染列表与两种状态，并通过同一个 face 回传 `openSession`（`uiWorkspace` 服务）与 `restoreSession`（`uiWorkspace.unarchiveSession`）。
 
 </details>
 

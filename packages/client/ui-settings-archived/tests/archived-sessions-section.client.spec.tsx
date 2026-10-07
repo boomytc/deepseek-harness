@@ -23,8 +23,10 @@ afterEach(cleanup)
 const sid = (id: string) => id as SessionId
 
 const ROWS: readonly ArchivedSessionRow[] = [
-  { sessionId: sid('b'), title: 'Second', workspace: 'Alpha', updatedAt: Date.UTC(2026, 8, 2) },
-  { sessionId: sid('orphan'), title: 'Orphan', workspace: undefined, updatedAt: Date.UTC(2026, 8, 1) },
+  // The archive instant, not the last update, is the date on the row: the two
+  // are deliberately different days so a row that showed the wrong one fails.
+  { sessionId: sid('b'), title: 'Second', workspace: 'Alpha', updatedAt: Date.UTC(2026, 7, 20), archivedAt: Date.UTC(2026, 8, 2) },
+  { sessionId: sid('orphan'), title: 'Orphan', workspace: undefined, updatedAt: Date.UTC(2026, 7, 19), archivedAt: Date.UTC(2026, 8, 1) },
 ]
 
 /** Render the page over one row list; the returned store publishes later states. */
@@ -64,6 +66,16 @@ describe('ArchivedSessionsSection', () => {
     // Workspace title, or the Ungrouped label when no Workspace holds it.
     expect(list.getByText(/Alpha/)).toBeTruthy()
     expect(list.getByText(/未分组/)).toBeTruthy()
+    expect(list.getAllByText(/已归档于 2026年9月2日/)).toHaveLength(1)
+  })
+
+  it('leaves a row whose archive instant has not arrived without a date', () => {
+    const { view } = renderSection([
+      { sessionId: sid('a'), title: 'Pending', workspace: 'Alpha', updatedAt: Date.UTC(2026, 8, 2), archivedAt: undefined },
+    ])
+    const row = view.getByText('Pending').closest('li') as HTMLElement
+    expect(within(row).getByText(/Alpha/)).toBeTruthy()
+    expect(within(row).queryByText(/已归档于/)).toBeNull()
   })
 
   it('shows the empty state instead of a list', () => {
@@ -113,6 +125,6 @@ describe('ArchivedSessionsSection', () => {
     const { view } = renderSection(ROWS, { t: makeTranslate(en, commonEn) })
     expect(view.getByRole('heading', { name: 'Archived sessions' })).toBeTruthy()
     expect(view.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
-    expect(view.getByText(/Sep 2, 2026/)).toBeTruthy()
+    expect(view.getByText(/Archived Sep 2, 2026/)).toBeTruthy()
   })
 })
